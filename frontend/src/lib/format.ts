@@ -1,5 +1,5 @@
 import { ApiError } from '../api/client'
-import type { RequestPriority, RequestStatus, Role } from '../api/types'
+import type { EmploymentStatus, RequestPriority, RequestStatus, Role } from '../api/types'
 
 export const label = (value: string) =>
   value
@@ -28,3 +28,5 @@ export const errorText = (err: Error) => {
 
 export const statuses: RequestStatus[] = ['SUBMITTED', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']
 export const priorities: RequestPriority[] = ['LOW', 'MEDIUM', 'HIGH', 'URGENT']
+export const roles: Role[] = ['EMPLOYEE', 'MANAGER', 'HR_ADMIN']
+export const employmentStatuses: EmploymentStatus[] = ['ACTIVE', 'ON_PROBATION', 'ON_NOTICE']

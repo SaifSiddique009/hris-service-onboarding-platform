@@ -215,3 +215,78 @@ export interface TemplateTaskInput {
   deadline_value: number
   depends_on_task_id: number | null
 }
+
+export type EmploymentStatus = User['status']
+
+export interface UserWrite {
+  full_name: string
+  email: string
+  password: string
+  job_title: string
+  role: Role
+  country: string
+  department_id: number
+  manager_id: number | null
+  status: EmploymentStatus
+  joining_date: string
+}
+
+export type UserUpdate = Partial<Omit<UserWrite, 'email' | 'password' | 'full_name'>> & { is_active?: boolean }
+
+export interface UserUpdated extends User {
+  open_items: number
+}
+
+export interface Group {
+  label: string
+  count: number
+}
+
+export interface HeadcountReport {
+  total: number
+  by_country: Group[]
+  by_department: Group[]
+  by_status: Group[]
+}
+
+export interface RequestsReport {
+  open_total: number
+  unresolved_total: number
+  awaiting_confirmation_total: number
+  by_status: Group[]
+  by_category: Group[]
+  by_priority: Group[]
+}
+
+export interface OnboardingReport {
+  active_new_hires: number
+  completed_new_hires: number
+  overdue_tasks: number
+  blocked_tasks: number
+}
+
+export interface OpenRequestRow {
+  reference: string
+  title: string | null
+  category: string
+  status: RequestStatus
+  priority: RequestPriority
+}
+
+export interface InsightsReport {
+  new_hires_with_open_requests: { new_hire: string; country: string; open_requests: OpenRequestRow[] }[]
+  onboarding_completion_by_country: { country: string; total_tasks: number; completed_tasks: number; rate: number }[]
+  work_held_by_inactive_users: { requests: number; onboarding_tasks: number }
+}
+
+export interface ToolUse {
+  name: string
+  arguments: Record<string, unknown>
+  row_count: number
+  rows: Record<string, unknown>[]
+}
+
+export interface AiAnswer {
+  answer: string
+  tools_used: ToolUse[]
+}
