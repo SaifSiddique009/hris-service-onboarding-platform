@@ -3,6 +3,7 @@ from datetime import date
 
 from sqlalchemy import select
 
+from app.modules.onboarding.models import OnboardingChecklist, OnboardingTask
 from app.modules.requests.models import ServiceRequest
 from app.modules.users.models import User
 from app.seed.__main__ import seed_all
@@ -42,3 +43,14 @@ def test_seed_meets_the_required_mix(db):
         assert times == sorted(times), request.title
         assert request.created_at == times[0]
         assert (request.status.value == "CLOSED") == (request.closed_at is not None)
+
+    checklists = db.scalars(select(OnboardingChecklist)).all()
+    assert 5 <= len(checklists) <= 10
+    assert all(8 <= len(c.tasks) <= 12 for c in checklists)
+    assert {c.employee_id for c in checklists} == {u.id for u in new_hires}
+    tasks = db.scalars(select(OnboardingTask)).all()
+    assert {t.status.value for t in tasks} == {"NOT_STARTED", "IN_PROGRESS", "COMPLETED"}
+    assert sum(t.is_overdue for t in tasks) >= 3
+    assert sum(t.is_blocked for t in tasks) >= 2
+    assert sum(t.depends_on_task_id is not None for t in tasks) >= len(checklists) * 5
+    assert any(not c.is_active for c in checklists) and any(c.is_active for c in checklists)
