@@ -12,6 +12,7 @@ def login(client, email, password=PASSWORD):
 
 def test_health_is_public(client):
     assert client.get(f"{API}/health").json() == {"status": "ok"}
+    assert client.head(f"{API}/health").status_code == 200
 
 
 def test_login_returns_token_and_user(client, world):

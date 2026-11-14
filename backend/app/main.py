@@ -22,7 +22,8 @@ register_error_handlers(app)
 api = APIRouter(prefix="/api/v1")
 
 
-@api.get("/health", tags=["health"])
+# HEAD as well as GET: uptime monitors check with HEAD.
+@api.api_route("/health", methods=["GET", "HEAD"], tags=["health"])
 def health():
     return {"status": "ok"}
 
