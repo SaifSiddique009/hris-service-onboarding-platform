@@ -1,28 +1,37 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
+import { ChevronDown, CornerUpLeft } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 import { api } from '../../api/client'
-import type { OnboardingTask, TaskAction } from '../../api/types'
-import { Badge } from '../../components/Badge'
+import type { OnboardingTask, TaskAction, TaskEvent } from '../../api/types'
 import { Button } from '../../components/Button'
-import { formatDay, label } from '../../lib/format'
+import { eyebrowClass } from '../../components/PageHeader'
+import { OverdueMark, StatusBadge } from '../../components/RequestBadges'
+import { cn } from '../../lib/cn'
+import { formatDateTime, formatDay, label } from '../../lib/format'
 
 const actionText: Record<TaskAction, string> = { start: 'Start', complete: 'Complete', put_back: 'Put back', reopen: 'Reopen' }
 
-const statusTone = {
-  NOT_STARTED: 'bg-slate-100 text-slate-700',
-  IN_PROGRESS: 'bg-amber-50 text-amber-800',
-  COMPLETED: 'bg-green-50 text-green-700',
-  BLOCKED: 'bg-red-50 text-red-700',
-}
-
 interface Props {
   task: OnboardingTask
+  number?: number
   showEmployee?: boolean
+  history?: TaskEvent[]
+  // Task id to number for every task on the page, so a waited-for task can be jumped to.
+  numbers?: Map<number, number>
   children?: ReactNode
 }
 
-export function TaskCard({ task, showEmployee, children }: Props) {
+function jumpTo(id: number) {
+  const el = document.getElementById(`task-${id}`)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  el.style.backgroundColor = '#fbf3d9'
+  setTimeout(() => (el.style.backgroundColor = ''), 1200)
+}
+
+export function TaskCard({ task, number, showEmployee, history, numbers, children }: Props) {
   const queryClient = useQueryClient()
+  const [showHistory, setShowHistory] = useState(false)
   const act = useMutation({
     mutationFn: (action: TaskAction) =>
       api(`/onboarding/tasks/${task.id}/transitions`, { method: 'POST', body: JSON.stringify({ action }) }),
@@ -30,49 +39,87 @@ export function TaskCard({ task, showEmployee, children }: Props) {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['onboarding'] }),
   })
   const { employee } = task
+  const blocked = task.effective_status === 'BLOCKED'
+  const attention = blocked || task.is_overdue
+  const waitingFor = blocked ? task.depends_on : null
+  const waitingNumber = waitingFor && numbers?.get(waitingFor.id)
 
   return (
-    <li className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          {showEmployee && (
-            <p className="text-xs font-medium text-indigo-700">
-              {employee.full_name} · {employee.department.name} · {employee.country.name}
+    <li
+      id={`task-${task.id}`}
+      className={cn(
+        'grid gap-4 border-b border-l-3 border-line border-l-transparent py-6 pl-3.5 pr-5 transition-colors duration-[1800ms] max-md:gap-2.5 max-md:pr-3',
+        number ? 'grid-cols-[44px_1fr] max-md:grid-cols-[28px_1fr]' : 'grid-cols-1',
+        attention && 'border-l-danger bg-danger-wash',
+      )}
+    >
+      {number && <span className="font-serif text-xl tabular-nums text-muted">{String(number).padStart(2, '0')}</span>}
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+          <div className="min-w-0">
+            {showEmployee && (
+              <p className={eyebrowClass}>
+                {employee.full_name} · {employee.department.name} · {employee.country.name}
+              </p>
+            )}
+            <h3 className={cn('text-[15.5px] font-semibold', task.effective_status === 'COMPLETED' && 'text-muted')}>
+              {task.title}
+            </h3>
+            <p className="mt-1 text-[13.5px] text-muted">{task.description}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {task.is_overdue && <OverdueMark />}
+            <StatusBadge status={task.effective_status} />
+          </div>
+        </div>
+
+        {waitingFor &&
+          (waitingNumber ? (
+            <button
+              type="button"
+              onClick={() => jumpTo(waitingFor.id)}
+              className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-sm border border-dashed border-danger bg-paper px-3 text-left text-[13.5px] text-danger hover:bg-danger-soft max-md:min-h-11"
+            >
+              <CornerUpLeft aria-hidden size={16} strokeWidth={1.8} className="shrink-0" />
+              <span>
+                Waiting for:{' '}
+                <b className="font-semibold">
+                  {waitingNumber}. {waitingFor.title}
+                </b>
+              </span>
+            </button>
+          ) : (
+            <p className="mt-3 text-[13.5px] text-danger">
+              Waiting for: <b className="font-semibold">{waitingFor.title}</b>
             </p>
-          )}
-          <h3 className="font-medium">{task.title}</h3>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge tone={statusTone[task.effective_status]}>{label(task.effective_status)}</Badge>
-          {task.is_overdue && <Badge tone="bg-red-600 text-white">Overdue</Badge>}
-        </div>
-      </div>
-      <p className="mt-1 text-sm text-slate-600">{task.description}</p>
-      {task.effective_status === 'BLOCKED' && task.depends_on && (
-        <p className="mt-2 text-sm font-medium text-red-700">Waiting for: {task.depends_on.title}</p>
-      )}
-      <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500">
-        <div>
-          Owner: <span className="text-slate-700">{task.owner_department?.name ?? 'Line manager'}</span>
-        </div>
-        <div>
-          Assignee: <span className="text-slate-700">{task.assignee.full_name}</span>
-        </div>
-        <div>
-          Due: <span className={task.is_overdue ? 'font-medium text-red-700' : 'text-slate-700'}>{formatDay(task.due_date)}</span>
-        </div>
-      </dl>
-      {act.isError && (
-        <p role="alert" className="mt-2 text-sm text-red-600">
-          {act.error.message}
-        </p>
-      )}
-      {task.allowed_actions.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
+          ))}
+
+        <dl className="mt-3 flex flex-wrap gap-x-7 gap-y-1.5 text-[13px]">
+          <div className="flex gap-1.5">
+            <dt className="text-muted">Owner</dt>
+            <dd>{task.owner_department?.name ?? 'Line manager'}</dd>
+          </div>
+          <div className="flex gap-1.5">
+            <dt className="text-muted">Assignee</dt>
+            <dd>{task.assignee.full_name}</dd>
+          </div>
+          <div className="flex gap-1.5">
+            <dt className="text-muted">Due</dt>
+            <dd className={cn('tabular-nums', task.is_overdue && 'font-semibold text-danger')}>{formatDay(task.due_date)}</dd>
+          </div>
+        </dl>
+
+        {act.isError && (
+          <p role="alert" className="mt-2 text-[13px] font-medium text-danger">
+            {act.error.message}
+          </p>
+        )}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           {task.allowed_actions.map((a) => (
             <Button
               key={a}
-              variant={a === 'complete' ? 'primary' : 'secondary'}
+              size="sm"
+              variant={a === 'complete' || a === 'start' ? 'primary' : 'secondary'}
               loading={act.isPending && act.variables === a}
               disabled={act.isPending}
               onClick={() => act.mutate(a)}
@@ -80,9 +127,38 @@ export function TaskCard({ task, showEmployee, children }: Props) {
               {actionText[a]}
             </Button>
           ))}
+          {history && (
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-expanded={showHistory}
+              aria-controls={`history-${task.id}`}
+              onClick={() => setShowHistory(!showHistory)}
+            >
+              History ({history.length})
+              <ChevronDown
+                aria-hidden
+                size={16}
+                strokeWidth={1.8}
+                className={cn('transition-transform', showHistory && 'rotate-180')}
+              />
+            </Button>
+          )}
+          {children}
         </div>
-      )}
-      {children}
+        {history && showHistory && (
+          <ol id={`history-${task.id}`} className="mt-3 animate-rise space-y-2 border-l border-control pl-3.5 text-[13px]">
+            {history.map((e, i) => (
+              <li key={i}>
+                {e.note ?? (e.from_status ? `${label(e.from_status)} to ${label(e.to_status)}` : 'Created')}
+                <span className="block text-muted">
+                  {e.actor.full_name} · {formatDateTime(e.created_at)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
     </li>
   )
 }

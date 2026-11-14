@@ -1,17 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { DeadlineUnit, TaskOwnerKind, TemplateDetail, TemplateTask, TemplateTaskInput } from '../../api/types'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
+import { ChipGroup } from '../../components/ChipGroup'
 import { Field, Input, Select, Textarea } from '../../components/Fields'
 import { FormDialog } from '../../components/FormDialog'
 import { Modal } from '../../components/Modal'
 import { PageHeader } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
+import { EmptyState } from '../../components/States'
 import { errorText } from '../../lib/format'
 import { useDepartments } from '../requests/queries'
+import { ChoiceField } from './ChoiceField'
 import { ActiveBadge } from './TemplatesPage'
 
 const json = (method: string, body?: object) => ({ method, body: body && JSON.stringify(body) })
@@ -36,13 +40,13 @@ function TemplateForm({ template }: { template: TemplateDetail }) {
   )
 
   return (
-    <Card className="mb-6">
+    <Card>
       <form
         onSubmit={(e) => {
           e.preventDefault()
           save.mutate({ name: name.trim(), description: description.trim() })
         }}
-        className="space-y-4"
+        className="flex max-w-2xl flex-col gap-4"
       >
         <Field label="Name">
           <Input required minLength={3} maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
@@ -51,7 +55,7 @@ function TemplateForm({ template }: { template: TemplateDetail }) {
           <Textarea rows={3} required minLength={3} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
         {save.isError && (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="text-[13px] font-medium text-danger">
             {errorText(save.error)}
           </p>
         )}
@@ -105,9 +109,11 @@ function TaskDialog({ template, task, onClose }: { template: TemplateDetail; tas
   return (
     <FormDialog
       title={task ? 'Edit task' : 'Add task'}
+      eyebrow="Template"
       submitLabel="Save"
       onClose={onClose}
       pending={save.isPending}
+      disabled={kind === 'DEPARTMENT' && !department}
       error={save.error ? errorText(save.error) : undefined}
       onSubmit={save.mutate}
     >
@@ -117,36 +123,44 @@ function TaskDialog({ template, task, onClose }: { template: TemplateDetail; tas
       <Field label="Description">
         <Textarea rows={3} required minLength={3} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
-      <Field label="Owner">
-        <Select value={kind} onChange={(e) => setKind(e.target.value as TaskOwnerKind)}>
-          <option value="DEPARTMENT">Department</option>
-          <option value="LINE_MANAGER">Line manager</option>
-        </Select>
-      </Field>
+      <ChoiceField label="Owner">
+        <ChipGroup
+          label="Owner"
+          value={kind}
+          onChange={(v) => setKind(v as TaskOwnerKind)}
+          options={[
+            { value: 'DEPARTMENT', label: 'Department' },
+            { value: 'LINE_MANAGER', label: 'Line manager' },
+          ]}
+        />
+      </ChoiceField>
       {kind === 'DEPARTMENT' && (
-        <Field label="Department">
-          <Select required value={department} onChange={(e) => setDepartment(e.target.value)}>
-            <option value="">Choose a department</option>
-            {departments?.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <ChoiceField label="Department">
+          <ChipGroup
+            label="Department"
+            value={department}
+            onChange={setDepartment}
+            options={(departments ?? []).map((d) => ({ value: String(d.id), label: d.name }))}
+          />
+        </ChoiceField>
       )}
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Deadline unit">
-          <Select value={unit} onChange={(e) => setUnit(e.target.value as DeadlineUnit)}>
-            <option value="DAY">Day</option>
-            <option value="WEEK">Week</option>
-          </Select>
-        </Field>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <ChoiceField label="Deadline unit">
+          <ChipGroup
+            label="Deadline unit"
+            value={unit}
+            onChange={(v) => setUnit(v as DeadlineUnit)}
+            options={[
+              { value: 'DAY', label: 'Day' },
+              { value: 'WEEK', label: 'Week' },
+            ]}
+          />
+        </ChoiceField>
         <Field label="Deadline value">
           <Input type="number" required min={1} max={365} value={value} onChange={(e) => setValue(e.target.value)} />
         </Field>
       </div>
-      <p className="-mt-2 text-xs text-slate-500">Day 1 is the start date. Week 1 ends on day 7.</p>
+      <p className="-mt-2 text-[13px] text-muted">Day 1 is the start date. Week 1 ends on day 7.</p>
       <Field label="Waits for">
         <Select value={dependsOn} onChange={(e) => setDependsOn(e.target.value)}>
           <option value="">Nothing</option>
@@ -170,21 +184,27 @@ function DeleteDialog({ template, task, onClose }: { template: TemplateDetail; t
     onClose,
   )
   return (
-    <Modal title="Delete task" onClose={onClose}>
-      <p className="text-sm text-slate-600">Delete "{task.title}" from this template? Existing checklists are not changed.</p>
+    <Modal
+      title="Delete task"
+      eyebrow="Template"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="danger" loading={remove.isPending} onClick={() => remove.mutate()}>
+            Delete
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-n-600">Delete "{task.title}" from this template? Existing checklists are not changed.</p>
       {remove.isError && (
-        <p role="alert" className="mt-3 text-sm text-red-600">
+        <p role="alert" className="mt-3 text-[13px] font-medium text-danger">
           {remove.error.message}
         </p>
       )}
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button loading={remove.isPending} onClick={() => remove.mutate()}>
-          Delete
-        </Button>
-      </div>
     </Modal>
   )
 }
@@ -195,41 +215,54 @@ function TaskList({ template }: { template: TemplateDetail }) {
   const titleOf = (id: number) => template.tasks.find((t) => t.id === id)?.title
 
   return (
-    <>
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Tasks</h2>
-        <Button onClick={() => setEditing('new')}>Add task</Button>
+    <section className="mt-14">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-t border-ink pt-4">
+        <h2 className="font-serif text-[28px] leading-[1.2]">Tasks</h2>
+        <Button onClick={() => setEditing('new')}>
+          <Plus aria-hidden size={16} strokeWidth={1.8} />
+          Add task
+        </Button>
       </div>
       {template.tasks.length === 0 ? (
-        <Card className="py-12 text-center text-sm text-slate-500">This template has no tasks yet.</Card>
+        <EmptyState title="This template has no tasks yet" help="Add the first task a new hire should complete." />
       ) : (
-        <ol className="space-y-3">
-          {template.tasks.map((t) => (
-            <li key={t.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="font-medium">{t.title}</h3>
-                  <p className="mt-1 text-sm text-slate-600">{t.description}</p>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="secondary" onClick={() => setEditing(t)}>
+        <ol className="border-t border-line">
+          {template.tasks.map((t, i) => (
+            <li
+              key={t.id}
+              className="grid grid-cols-[44px_1fr] gap-4 border-b border-line py-6 pl-3.5 pr-5 max-md:grid-cols-[28px_1fr] max-md:gap-2.5 max-md:pr-3"
+            >
+              <span className="font-serif text-xl tabular-nums text-muted">{String(i + 1).padStart(2, '0')}</span>
+              <div className="min-w-0">
+                <h3 className="text-[15.5px] font-semibold">{t.title}</h3>
+                <p className="mt-1 text-[13.5px] text-muted">{t.description}</p>
+                <dl className="mt-3 flex flex-wrap gap-x-7 gap-y-1.5 text-[13px]">
+                  <div className="flex gap-1.5">
+                    <dt className="text-muted">Owner</dt>
+                    <dd>{t.owner_department?.name ?? 'Line manager'}</dd>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <dt className="text-muted">Due</dt>
+                    <dd>{t.deadline_label}</dd>
+                  </div>
+                  {t.depends_on_task_id && (
+                    <div className="flex gap-1.5">
+                      <dt className="text-muted">Waits for</dt>
+                      <dd>{titleOf(t.depends_on_task_id)}</dd>
+                    </div>
+                  )}
+                </dl>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(t)}>
+                    <Pencil aria-hidden size={16} strokeWidth={1.8} />
                     Edit
                   </Button>
-                  <Button variant="secondary" onClick={() => setDeleting(t)}>
+                  <Button size="sm" variant="danger" onClick={() => setDeleting(t)}>
+                    <Trash2 aria-hidden size={16} strokeWidth={1.8} />
                     Delete
                   </Button>
                 </div>
               </div>
-              <p className="mt-3 text-xs text-slate-500">
-                Owner: <span className="text-slate-700">{t.owner_department?.name ?? 'Line manager'}</span> · Due:{' '}
-                <span className="text-slate-700">{t.deadline_label}</span>
-                {t.depends_on_task_id && (
-                  <>
-                    {' '}
-                    · Waits for <span className="text-slate-700">{titleOf(t.depends_on_task_id)}</span>
-                  </>
-                )}
-              </p>
             </li>
           ))}
         </ol>
@@ -238,7 +271,7 @@ function TaskList({ template }: { template: TemplateDetail }) {
         <TaskDialog template={template} task={editing === 'new' ? undefined : editing} onClose={() => setEditing(undefined)} />
       )}
       {deleting && <DeleteDialog template={template} task={deleting} onClose={() => setDeleting(undefined)} />}
-    </>
+    </section>
   )
 }
 
@@ -250,11 +283,8 @@ export function TemplateDetailPage() {
   })
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <Link to="/onboarding/templates" className="mb-3 inline-block text-sm text-indigo-700 hover:underline">
-        Back to templates
-      </Link>
-      <PageHeader title="Template" />
+    <>
+      <PageHeader title={query.data?.name ?? 'Template'} eyebrow="Template" back={{ to: '/onboarding/templates', label: 'Templates' }} />
       <QueryBoundary query={query}>
         {(t) => (
           <>
@@ -263,6 +293,6 @@ export function TemplateDetailPage() {
           </>
         )}
       </QueryBoundary>
-    </div>
+    </>
   )
 }

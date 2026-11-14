@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { OnboardingTask } from '../../api/types'
-import { Card } from '../../components/Card'
 import { PageHeader } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
+import { EmptyState } from '../../components/States'
+import { Tabs } from '../../components/Tabs'
 import { TaskCard } from './TaskCard'
 
 const tabs = [
@@ -23,36 +24,44 @@ export function MyTasksPage() {
   })
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <PageHeader title="My tasks" subtitle="Onboarding tasks you own, soonest due date first." />
-      <div role="tablist" className="mb-4 flex gap-1 overflow-x-auto border-b border-slate-200">
-        {tabs.map((t) => (
-          <button
-            key={t.state}
-            role="tab"
-            aria-selected={tab === t}
-            onClick={() => setParams({ state: t.state })}
-            className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
-              tab === t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            {t.text}
-          </button>
-        ))}
+    <>
+      <PageHeader title="My tasks" eyebrow="Onboarding" subtitle="Onboarding tasks you own, soonest due date first." />
+      <Tabs
+        label="Task state"
+        value={tab.state}
+        onChange={(state) => setParams({ state })}
+        tabs={tabs.map((t) => ({
+          value: t.state,
+          label: t.text,
+          count: t === tab ? query.data?.length : undefined,
+          hot: t.state === 'overdue' || t.state === 'blocked',
+        }))}
+      />
+      <div className="mt-6">
+        <QueryBoundary query={query}>
+          {(tasks) =>
+            tasks.length === 0 ? (
+              <EmptyState
+                title={tab.empty}
+                help="Tasks appear here when a checklist assigns them to you."
+                action={
+                  tab.state !== 'open' && (
+                    <Link to="?state=open" className="text-sm font-semibold">
+                      Show open tasks
+                    </Link>
+                  )
+                }
+              />
+            ) : (
+              <ul className="border-t border-ink">
+                {tasks.map((t) => (
+                  <TaskCard key={t.id} task={t} showEmployee />
+                ))}
+              </ul>
+            )
+          }
+        </QueryBoundary>
       </div>
-      <QueryBoundary query={query}>
-        {(tasks) =>
-          tasks.length === 0 ? (
-            <Card className="py-12 text-center text-sm text-slate-500">{tab.empty}</Card>
-          ) : (
-            <ul className="space-y-3">
-              {tasks.map((t) => (
-                <TaskCard key={t.id} task={t} showEmployee />
-              ))}
-            </ul>
-          )
-        }
-      </QueryBoundary>
-    </div>
+    </>
   )
 }

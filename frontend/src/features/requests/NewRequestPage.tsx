@@ -1,12 +1,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Check, Lock } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, api } from '../../api/client'
 import type { RequestDetail, RequestPriority } from '../../api/types'
 import { Button } from '../../components/Button'
-import { Card } from '../../components/Card'
-import { Field, Input, Select, Textarea } from '../../components/Fields'
+import { ChipGroup } from '../../components/ChipGroup'
+import { Field, Input, Textarea } from '../../components/Fields'
 import { PageHeader } from '../../components/PageHeader'
+import { LoadingState } from '../../components/States'
+import { cn } from '../../lib/cn'
 import { label, priorities } from '../../lib/format'
 import { useCategories } from './queries'
 
@@ -43,65 +46,89 @@ export function NewRequestPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <PageHeader title="New request" />
-      <Card>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <Field
-            label="Category"
-            error={fields.category_id}
-            hint={
-              category && (
-                <>
-                  {category.description}
-                  {category.is_confidential && (
-                    <span className="mt-1 block text-slate-700">
-                      Only you, the person HR assigns, and HR can see this request.
+    <div className="max-w-[640px]">
+      <PageHeader eyebrow="Service requests" title="New request" back={{ to: '/requests', label: 'Requests' }} />
+      <form onSubmit={onSubmit} className="flex flex-col gap-6 border-t border-ink pt-6">
+        <fieldset>
+          <legend className="mb-1.5 text-[13px] font-semibold">Category</legend>
+          {categories.isPending ? (
+            <LoadingState />
+          ) : (
+            <div role="radiogroup" aria-label="Category" className="border-t border-ink">
+              {categories.data?.map((c) => {
+                const checked = c.id === category?.id
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={checked}
+                    onClick={() => setCategoryId(String(c.id))}
+                    className={cn(
+                      'grid min-h-14 w-full grid-cols-[1fr_auto] items-center gap-3 border-b border-l-[3px] border-b-line border-l-transparent py-2 pl-[11px] pr-3.5 text-left hover:bg-[#f0f2ec]',
+                      checked && 'border-l-accent bg-accent-soft',
+                    )}
+                  >
+                    <span>
+                      <span className="flex items-center gap-2 text-[14.5px] font-semibold">
+                        {c.name}
+                        {c.is_confidential && <Lock aria-label="Confidential" size={14} strokeWidth={1.8} className="text-muted" />}
+                      </span>
+                      <span className="block text-[12.5px] text-muted">{c.description}</span>
                     </span>
-                  )}
-                </>
-              )
-            }
-          >
-            <Select required value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-              <option value="">Select a category</option>
-              {categories.data?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Title" error={fields.title}>
-            <Input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
-          </Field>
-          <Field label="Description" error={fields.description}>
-            <Textarea required rows={6} maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} />
-          </Field>
-          <Field label="Priority" error={fields.priority}>
-            <Select value={priority} onChange={(e) => setPriority(e.target.value as RequestPriority)}>
-              {priorities.map((p) => (
-                <option key={p} value={p}>
-                  {label(p)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {error && !Object.keys(fields).length && (
-            <p role="alert" className="text-sm text-red-600">
-              {error.message}
+                    {checked && <Check aria-hidden size={16} strokeWidth={1.8} className="text-accent" />}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {fields.category_id && (
+            <p role="alert" className="mt-1.5 text-[13px] font-medium text-danger">
+              {fields.category_id}
             </p>
           )}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => navigate('/requests')}>
-              Cancel
-            </Button>
-            <Button type="submit" loading={create.isPending}>
-              Submit request
-            </Button>
-          </div>
-        </form>
-      </Card>
+          {category?.is_confidential && (
+            <p className="mt-2 flex items-center gap-2 text-[13px] text-n-600">
+              <Lock aria-hidden size={14} strokeWidth={1.8} />
+              Only you, the person HR assigns, and HR can see this request.
+            </p>
+          )}
+        </fieldset>
+        <Field label="Title" error={fields.title}>
+          <Input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
+        </Field>
+        <Field label="Description" error={fields.description}>
+          <Textarea required rows={6} maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} />
+        </Field>
+        <div>
+          <p className="mb-1.5 text-[13px] font-semibold">Priority</p>
+          <ChipGroup
+            segmented
+            label="Priority"
+            value={priority}
+            onChange={(value) => setPriority(value as RequestPriority)}
+            options={priorities.map((p) => ({ value: p, label: label(p) }))}
+          />
+          {fields.priority && (
+            <p role="alert" className="mt-1.5 text-[13px] font-medium text-danger">
+              {fields.priority}
+            </p>
+          )}
+        </div>
+        {error && !Object.keys(fields).length && (
+          <p role="alert" className="text-[13px] font-medium text-danger">
+            {error.message}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={() => navigate('/requests')}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={create.isPending} disabled={!categoryId}>
+            Submit request
+          </Button>
+        </div>
+      </form>
     </div>
   )
 }

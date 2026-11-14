@@ -1,11 +1,20 @@
+import { Clock } from 'lucide-react'
+import type { ReactNode } from 'react'
 import type { Progress } from '../../api/types'
+import { cn } from '../../lib/cn'
 
-function Counter({ text, value, alert }: { text: string; value: number; alert?: boolean }) {
-  const tone = alert && value > 0 ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-slate-50 text-slate-600'
+function Counter({ text, value, icon, alert }: { text: string; value: number; icon?: ReactNode; alert?: boolean }) {
+  const hot = alert && value > 0
   return (
-    <div className={`rounded-md px-3 py-1.5 text-center ${tone}`}>
-      <p className="text-lg font-semibold leading-tight">{value}</p>
-      <p className="text-xs">{text}</p>
+    <div
+      className={cn(
+        'inline-flex items-baseline gap-1.5 rounded-sm px-2.5 py-0.5 text-[13px]',
+        hot ? 'bg-danger-soft font-semibold text-danger' : alert && 'text-muted',
+      )}
+    >
+      {hot && <span className="self-center">{icon}</span>}
+      <b className="text-[15px] font-bold tabular-nums">{value}</b>
+      {text}
     </div>
   )
 }
@@ -14,26 +23,35 @@ export function ProgressSummary({ progress: p }: { progress: Progress }) {
   const percent = p.total ? Math.round((p.completed / p.total) * 100) : 0
   return (
     <div>
-      <div className="mb-1 flex justify-between text-xs text-slate-500">
-        <span>
-          {p.completed} of {p.total} tasks completed
+      <div className="flex items-baseline gap-3">
+        <span className="font-serif text-[40px] leading-none tabular-nums">{percent}%</span>
+        <span className="text-[13px] text-muted">
+          {p.completed} of {p.total} done
         </span>
-        <span>{percent}%</span>
       </div>
       <div
         role="progressbar"
+        aria-label="Tasks completed"
         aria-valuemin={0}
         aria-valuemax={p.total}
         aria-valuenow={p.completed}
-        className="h-2 overflow-hidden rounded-full bg-slate-200"
+        className="mt-3 h-1.5 rounded-xs bg-line"
       >
-        <div className="h-full bg-indigo-600" style={{ width: `${percent}%` }} />
+        <div
+          className="h-full rounded-xs bg-accent transition-[width] duration-500 ease-out-soft"
+          style={{ width: `${percent}%` }}
+        />
       </div>
-      <div className="mt-3 grid grid-cols-4 gap-2">
+      <div className="-ml-2.5 mt-3 flex flex-wrap gap-x-3 gap-y-1">
         <Counter text="Done" value={p.completed} />
         <Counter text="Pending" value={p.in_progress + p.not_started} />
-        <Counter text="Overdue" value={p.overdue} alert />
-        <Counter text="Blocked" value={p.blocked} alert />
+        <Counter text="Overdue" value={p.overdue} alert icon={<Clock aria-hidden size={14} strokeWidth={1.8} />} />
+        <Counter
+          text="Blocked"
+          value={p.blocked}
+          alert
+          icon={<span aria-hidden className="block size-[7px] rotate-45 bg-current" />}
+        />
       </div>
     </div>
   )

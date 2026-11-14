@@ -1,20 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { Template, TemplateDetail } from '../../api/types'
-import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
-import { Card } from '../../components/Card'
 import { Field, Input, Textarea } from '../../components/Fields'
 import { FormDialog } from '../../components/FormDialog'
 import { PageHeader } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
+import { StatusBadge } from '../../components/RequestBadges'
+import { EmptyState } from '../../components/States'
+import { RowLink, Table, Td, Th } from '../../components/Table'
 import { errorText } from '../../lib/format'
 
-export const ActiveBadge = ({ active }: { active: boolean }) => (
-  <Badge tone={active ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-700'}>{active ? 'Active' : 'Inactive'}</Badge>
-)
+export const ActiveBadge = ({ active }: { active: boolean }) => <StatusBadge status={active ? 'ACTIVE' : 'INACTIVE'} />
+
+const taskCount = (n: number) => `${n} ${n === 1 ? 'task' : 'tasks'}`
 
 function NewTemplateDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate()
@@ -33,6 +35,7 @@ function NewTemplateDialog({ onClose }: { onClose: () => void }) {
   return (
     <FormDialog
       title="New template"
+      eyebrow="Onboarding"
       submitLabel="Create"
       onClose={onClose}
       pending={create.isPending}
@@ -50,45 +53,74 @@ function NewTemplateDialog({ onClose }: { onClose: () => void }) {
 }
 
 export function TemplatesPage() {
+  const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
   const list = useQuery({ queryKey: ['onboarding', 'templates'], queryFn: () => api<Template[]>('/onboarding/templates') })
+  const newButton = (
+    <Button onClick={() => setCreating(true)}>
+      <Plus aria-hidden size={16} strokeWidth={1.8} />
+      New template
+    </Button>
+  )
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <div className="flex items-start justify-between gap-4">
-        <PageHeader title="Templates" subtitle="Task lists that become a checklist when a new hire is assigned." />
-        <Button className="shrink-0" onClick={() => setCreating(true)}>
-          New template
-        </Button>
-      </div>
+    <>
+      <PageHeader
+        title="Templates"
+        eyebrow="Onboarding"
+        subtitle="Task lists that become a checklist when a new hire is assigned."
+        actions={newButton}
+      />
       <QueryBoundary query={list}>
         {(templates) =>
           templates.length === 0 ? (
-            <Card className="py-12 text-center text-sm text-slate-500">No templates yet.</Card>
+            <EmptyState title="No templates yet" help="A template is the task list a new hire receives." action={newButton} />
           ) : (
-            <ul className="space-y-3">
-              {templates.map((t) => (
-                <li key={t.id}>
-                  <Link
-                    to={`/onboarding/templates/${t.id}`}
-                    className="block rounded-lg border border-slate-200 bg-white p-4 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h2 className="font-semibold">{t.name}</h2>
-                      <ActiveBadge active={t.is_active} />
-                    </div>
-                    <p className="mt-1 text-sm text-slate-600">{t.description}</p>
-                    <p className="mt-2 text-xs text-slate-500">
-                      {t.task_count} {t.task_count === 1 ? 'task' : 'tasks'}
-                    </p>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <>
+              <Table className="max-md:hidden">
+                <thead>
+                  <tr>
+                    <Th>Name</Th>
+                    <Th>Description</Th>
+                    <Th className="text-right">Tasks</Th>
+                    <Th>Status</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {templates.map((t) => (
+                    <RowLink key={t.id} onOpen={() => navigate(`/onboarding/templates/${t.id}`)}>
+                      <Td className="font-semibold">{t.name}</Td>
+                      <Td className="max-w-md text-n-600">{t.description}</Td>
+                      <Td className="text-right tabular-nums">{t.task_count}</Td>
+                      <Td>
+                        <ActiveBadge active={t.is_active} />
+                      </Td>
+                    </RowLink>
+                  ))}
+                </tbody>
+              </Table>
+              <ul className="border-t border-ink md:hidden">
+                {templates.map((t) => (
+                  <li key={t.id}>
+                    <Link
+                      to={`/onboarding/templates/${t.id}`}
+                      className="flex min-h-11 flex-col gap-2 border-b border-line py-4 text-ink no-underline hover:text-ink"
+                    >
+                      <span className="flex items-start justify-between gap-3">
+                        <span className="text-base font-semibold">{t.name}</span>
+                        <ActiveBadge active={t.is_active} />
+                      </span>
+                      <span className="text-[13px] text-n-600">{t.description}</span>
+                      <span className="text-[13px] tabular-nums text-muted">{taskCount(t.task_count)}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
           )
         }
       </QueryBoundary>
       {creating && <NewTemplateDialog onClose={() => setCreating(false)} />}
-    </div>
+    </>
   )
 }

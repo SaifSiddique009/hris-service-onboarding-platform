@@ -4,14 +4,19 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { ChecklistCreate, ChecklistCreated, ChecklistSummary, Page, Template, User } from '../../api/types'
 import { Button } from '../../components/Button'
+import { Avatar } from '../../components/Avatar'
 import { Card } from '../../components/Card'
-import { Field, Input, Select } from '../../components/Fields'
+import { ChipGroup } from '../../components/ChipGroup'
+import { Field, Input } from '../../components/Fields'
+import { FilterMenu } from '../../components/FilterMenu'
 import { FormDialog } from '../../components/FormDialog'
 import { PageHeader } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
+import { EmptyState } from '../../components/States'
 import { errorText, formatDay } from '../../lib/format'
 import { useAuth } from '../auth/AuthContext'
 import { useCountries } from '../requests/queries'
+import { ChoiceField } from './ChoiceField'
 import { PersonPicker } from './PersonPicker'
 import { ProgressSummary } from './ProgressSummary'
 
@@ -40,9 +45,9 @@ function AssignDialog({ onClose }: { onClose: () => void }) {
 
   if (created) {
     return (
-      <FormDialog title="Checklist assigned" submitLabel="Open checklist" pending={false} onClose={onClose} onSubmit={() => open(created)}>
-        <div role="status" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <p className="font-medium">Please check the following:</p>
+      <FormDialog title="Checklist assigned" eyebrow="Onboarding" submitLabel="Open checklist" pending={false} onClose={onClose} onSubmit={() => open(created)}>
+        <div role="status" className="rounded-sm bg-amber-soft p-3 text-sm text-amber">
+          <p className="font-semibold">Please check the following:</p>
           <ul className="mt-1 list-disc space-y-1 pl-5">
             {created.warnings.map((w) => (
               <li key={w}>{w}</li>
@@ -56,6 +61,7 @@ function AssignDialog({ onClose }: { onClose: () => void }) {
   return (
     <FormDialog
       title="Assign checklist"
+      eyebrow="Onboarding"
       submitLabel="Assign"
       onClose={onClose}
       pending={assign.isPending}
@@ -65,8 +71,8 @@ function AssignDialog({ onClose }: { onClose: () => void }) {
         assign.mutate({ employee_id: employee!.id, template_id: Number(templateId), start_date: start || null })
       }
     >
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium text-slate-700">Employee</legend>
+      <fieldset className="flex flex-col gap-3">
+        <legend className="mb-1.5 text-[13px] font-semibold">Employee</legend>
         <PersonPicker
           scope={['employees']}
           fetchPeople={fetchEmployees}
@@ -75,18 +81,14 @@ function AssignDialog({ onClose }: { onClose: () => void }) {
           detail={(u) => `${u.department.name} · Joined ${formatDay(u.joining_date)}`}
         />
       </fieldset>
-      <Field label="Template">
-        <Select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-          <option value="">Choose a template</option>
-          {templates.data
-            ?.filter((t) => t.is_active)
-            .map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-        </Select>
-      </Field>
+      <ChoiceField label="Template">
+        <ChipGroup
+          label="Template"
+          value={templateId}
+          onChange={setTemplateId}
+          options={(templates.data ?? []).filter((t) => t.is_active).map((t) => ({ value: String(t.id), label: t.name }))}
+        />
+      </ChoiceField>
       <Field
         label="Start date (optional)"
         hint={
@@ -102,19 +104,30 @@ function AssignDialog({ onClose }: { onClose: () => void }) {
 }
 
 function ChecklistCard({ c }: { c: ChecklistSummary }) {
-  const { employee } = c
+  const { employee, progress } = c
+  const attention = progress.overdue > 0 || progress.blocked > 0
   return (
-    <li className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm focus-within:ring-2 focus-within:ring-indigo-500">
-      <Link to={`/onboarding/checklists/${c.id}`} className="block focus:outline-none">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-          <h2 className="font-semibold text-slate-900">{employee.full_name}</h2>
-          <span className="text-xs text-slate-500">Start date {formatDay(c.start_date)}</span>
-        </div>
-        <p className="text-sm text-slate-600">
-          {employee.job_title} · {employee.department.name} · {employee.country.name}
-        </p>
-        <p className="mb-3 text-xs text-slate-500">{c.template.name}</p>
-        <ProgressSummary progress={c.progress} />
+    <li>
+      <Link
+        to={`/onboarding/checklists/${c.id}`}
+        className="block text-ink no-underline transition-colors hover:bg-[#f0efe6] hover:text-ink"
+      >
+        <Card variant={attention ? 'attention' : 'emphasis'} className="pb-5">
+          <div className="flex items-start gap-3">
+            <Avatar name={employee.full_name} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+                <h2 className="font-serif text-[21px] leading-snug">{employee.full_name}</h2>
+                <span className="text-[13px] tabular-nums text-muted">Starts {formatDay(c.start_date)}</span>
+              </div>
+              <p className="text-[13px] text-muted">
+                {employee.job_title} · {employee.department.name} · {employee.country.name}
+              </p>
+              <p className="mb-4 text-[13px] text-muted">{c.template.name}</p>
+              <ProgressSummary progress={progress} />
+            </div>
+          </div>
+        </Card>
       </Link>
     </li>
   )
@@ -142,43 +155,52 @@ export function TeamOnboardingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <div className="flex items-start justify-between gap-4">
-        <PageHeader
-          title="Team onboarding"
-          subtitle={isAdmin ? 'Everyone currently being onboarded.' : 'New hires in your team.'}
+    <>
+      <PageHeader
+        title="Team onboarding"
+        eyebrow="Onboarding"
+        subtitle={isAdmin ? 'Everyone currently being onboarded.' : 'New hires in your team.'}
+        actions={isAdmin && <Button onClick={() => setAssigning(true)}>Assign checklist</Button>}
+      />
+
+      <div className="mb-8 flex flex-wrap items-center gap-3">
+        <ChipGroup
+          segmented
+          label="State"
+          value={params.get('state') ?? ''}
+          onChange={(v) => update('state', v)}
+          options={[
+            { value: '', label: 'All states' },
+            { value: 'active', label: 'Active' },
+            { value: 'completed', label: 'Completed' },
+          ]}
         />
         {isAdmin && (
-          <Button className="shrink-0" onClick={() => setAssigning(true)}>
-            Assign checklist
-          </Button>
-        )}
-      </div>
-
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Select aria-label="State" value={params.get('state') ?? ''} onChange={(e) => update('state', e.target.value)} className="!mt-0">
-          <option value="">All states</option>
-          <option value="active">Active</option>
-          <option value="completed">Completed</option>
-        </Select>
-        {isAdmin && (
-          <Select aria-label="Country" value={params.get('country') ?? ''} onChange={(e) => update('country', e.target.value)} className="!mt-0">
-            <option value="">All countries</option>
-            {countries.data?.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
+          <FilterMenu
+            label="Country"
+            value={params.get('country') ?? ''}
+            onChange={(v) => update('country', v)}
+            options={(countries.data ?? []).map((c) => ({ value: c.code, label: c.name }))}
+          />
         )}
       </div>
 
       <QueryBoundary query={list}>
         {(items) =>
           items.length === 0 ? (
-            <Card className="py-12 text-center text-sm text-slate-500">No onboarding checklists match these filters.</Card>
+            <EmptyState
+              title="No onboarding checklists match these filters"
+              help="Try another state or country."
+              action={
+                params.size > 0 && (
+                  <Button variant="secondary" onClick={() => setParams({})}>
+                    Clear filters
+                  </Button>
+                )
+              }
+            />
           ) : (
-            <ul className="grid gap-4 md:grid-cols-2">
+            <ul className="grid grid-cols-1 gap-x-10 gap-y-10 lg:grid-cols-2">
               {items.map((c) => (
                 <ChecklistCard key={c.id} c={c} />
               ))}
@@ -188,6 +210,6 @@ export function TeamOnboardingPage() {
       </QueryBoundary>
 
       {assigning && <AssignDialog onClose={() => setAssigning(false)} />}
-    </div>
+    </>
   )
 }

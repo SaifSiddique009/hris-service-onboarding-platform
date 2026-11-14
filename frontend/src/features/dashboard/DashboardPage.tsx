@@ -1,221 +1,257 @@
 import { useQuery } from '@tanstack/react-query'
+import { Lock } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { Bar, BarChart, CartesianGrid, Cell, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, LabelList, XAxis, YAxis } from 'recharts'
 import { api } from '../../api/client'
 import type { HeadcountReport, InsightsReport, OnboardingReport, RequestStatus, RequestsReport } from '../../api/types'
+import { Avatar } from '../../components/Avatar'
+import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
-import { PageHeader } from '../../components/PageHeader'
+import { PageHeader, eyebrowClass } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { StatusBadge } from '../../components/RequestBadges'
-import { label } from '../../lib/format'
-import { ChartCard } from './ChartCard'
+import { cn } from '../../lib/cn'
+import { useAuth } from '../auth/AuthContext'
+import { ChartCard, animate } from './ChartCard'
 
-const INDIGO = '#4f46e5'
-const axis = { fontSize: 12, fill: '#475569' }
 const openStatuses: RequestStatus[] = ['SUBMITTED', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED']
 const statusColor: Record<string, string> = {
-  SUBMITTED: '#94a3b8',
-  ASSIGNED: '#3b82f6',
-  IN_PROGRESS: '#f59e0b',
-  RESOLVED: '#22c55e',
+  SUBMITTED: 'var(--color-blue)',
+  ASSIGNED: 'var(--color-plum)',
+  IN_PROGRESS: 'var(--color-amber)',
+  RESOLVED: 'var(--color-accent)',
 }
+const tick = { fontSize: 13.5, fill: 'var(--color-ink)' }
+const barLabel = { className: 'font-semibold tabular-nums', fontSize: 13.5, fill: 'var(--color-ink)' }
 
 const useReport = <T,>(name: string) => useQuery({ queryKey: ['dashboard', name], queryFn: () => api<T>(`/dashboard/${name}`) })
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
-function Tile({ title, value, note, alert }: { title: string; value: number; note?: string; alert?: boolean }) {
+const today = () => new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+
+function greeting(name: string) {
+  const hour = new Date().getHours()
+  return `Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}, ${name.split(' ')[0]}.`
+}
+
+function Metric({ title, value, note, alert }: { title: string; value: number; note?: string; alert?: boolean }) {
+  const hot = alert && value > 0
   return (
-    <Card className={`!p-4 ${alert ? '!border-red-200 !bg-red-50' : ''}`}>
-      <p className="text-xs font-medium text-slate-500">{title}</p>
-      <p className={`mt-1 text-3xl font-semibold ${alert ? 'text-red-700' : ''}`}>{value}</p>
-      {note && <p className="mt-1 text-xs text-slate-500">{note}</p>}
+    <Card variant={hot ? 'attention' : 'emphasis'}>
+      <p className={eyebrowClass}>{title}</p>
+      <p className={cn('mt-2 font-serif text-[52px] leading-none tabular-nums max-md:text-[40px]', hot && 'text-danger')}>{value}</p>
+      <p className="mt-2 min-h-5 text-[13px] text-muted">{note}</p>
     </Card>
   )
 }
 
-function Kpis() {
+function Metrics() {
   const headcount = useReport<HeadcountReport>('headcount')
   const requests = useReport<RequestsReport>('requests')
   const onboarding = useReport<OnboardingReport>('onboarding')
-  const overdue = onboarding.data?.overdue_tasks ?? 0
-  const blocked = onboarding.data?.blocked_tasks ?? 0
   return (
-    <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-      <Tile title="Total headcount" value={headcount.data?.total ?? 0} />
-      <Tile
+    <div className="grid grid-cols-2 gap-x-6 gap-y-8 lg:grid-cols-5">
+      <Metric title="Headcount" value={headcount.data?.total ?? 0} />
+      <Metric
         title="Open requests"
         value={requests.data?.open_total ?? 0}
-        note={requests.data && `${requests.data.unresolved_total} unresolved · ${requests.data.awaiting_confirmation_total} awaiting confirmation`}
+        note={requests.data && `${requests.data.unresolved_total} unresolved, ${requests.data.awaiting_confirmation_total} awaiting confirmation`}
       />
-      <Tile
-        title="New hires in onboarding"
+      <Metric
+        title="In onboarding"
         value={onboarding.data?.active_new_hires ?? 0}
         note={onboarding.data && `${onboarding.data.completed_new_hires} completed`}
       />
-      <Tile title="Overdue onboarding tasks" value={overdue} alert={overdue > 0} />
-      <Tile title="Blocked onboarding tasks" value={blocked} alert={blocked > 0} />
+      <Metric title="Overdue tasks" value={onboarding.data?.overdue_tasks ?? 0} alert />
+      <Metric title="Blocked tasks" value={onboarding.data?.blocked_tasks ?? 0} alert />
     </div>
   )
 }
 
-const grid = <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-const tip = <Tooltip cursor={{ fill: '#f1f5f9' }} />
-
-function HeadcountCharts() {
-  const headcount = useReport<HeadcountReport>('headcount')
-  return (
-    <QueryBoundary query={headcount}>
-      {(h) => (
-        <>
-          <ChartCard title="Headcount by country">
-            <BarChart data={h.by_country}>
-              {grid}
-              <XAxis dataKey="label" tick={axis} />
-              <YAxis allowDecimals={false} tick={axis} width={32} />
-              {tip}
-              <Bar dataKey="count" name="People" fill={INDIGO} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ChartCard>
-          <ChartCard title="Headcount by department">
-            <BarChart data={h.by_department} layout="vertical">
-              {grid}
-              <XAxis type="number" allowDecimals={false} tick={axis} />
-              <YAxis type="category" dataKey="label" tick={axis} width={110} />
-              {tip}
-              <Bar dataKey="count" name="People" fill={INDIGO} radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ChartCard>
-        </>
-      )}
-    </QueryBoundary>
-  )
-}
-
-function RequestCharts() {
-  const requests = useReport<RequestsReport>('requests')
-  return (
-    <QueryBoundary query={requests}>
-      {(r) => (
-        <>
-          <ChartCard title="Open requests by status">
-            <BarChart data={openStatuses.map((s) => ({ label: label(s), count: r.by_status.find((g) => g.label === s)?.count ?? 0 }))}>
-              {grid}
-              <XAxis dataKey="label" tick={axis} />
-              <YAxis allowDecimals={false} tick={axis} width={32} />
-              {tip}
-              <Bar dataKey="count" name="Requests" radius={[4, 4, 0, 0]}>
-                {openStatuses.map((s) => (
-                  <Cell key={s} fill={statusColor[s]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ChartCard>
-          <ChartCard title="Open requests by category">
-            <BarChart data={r.by_category} layout="vertical">
-              {grid}
-              <XAxis type="number" allowDecimals={false} tick={axis} />
-              <YAxis type="category" dataKey="label" tick={axis} width={110} />
-              {tip}
-              <Bar dataKey="count" name="Requests" fill={INDIGO} radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ChartCard>
-        </>
-      )}
-    </QueryBoundary>
-  )
-}
-
-function Insights() {
+function Attention() {
   const insights = useReport<InsightsReport>('insights')
   return (
     <QueryBoundary query={insights}>
-      {({ onboarding_completion_by_country: completion, new_hires_with_open_requests: hires, work_held_by_inactive_users: held }) => (
+      {({ new_hires_with_open_requests: hires, work_held_by_inactive_users: held }) => (
         <>
-          <ChartCard title="Onboarding completion by country">
-            <BarChart data={completion.map((c) => ({ ...c, percent: Math.round(c.rate * 100) }))}>
-              {grid}
-              <XAxis dataKey="country" tick={axis} />
-              <YAxis domain={[0, 100]} unit="%" tick={axis} width={40} />
-              <Tooltip
-                cursor={{ fill: '#f1f5f9' }}
-                formatter={(value, _name, item) => `${value}% (${item.payload.completed_tasks} / ${item.payload.total_tasks} tasks)`}
-              />
-              <Bar dataKey="percent" name="Completed" fill={INDIGO} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ChartCard>
+          {(held.requests > 0 || held.onboarding_tasks > 0) && (
+            <div className="mt-10 flex flex-wrap items-center justify-between gap-4 rounded-md border border-amber/30 bg-amber-soft px-5 py-4 text-amber">
+              <p className="flex items-start gap-3 text-[14.5px]">
+                <Lock aria-hidden size={16} strokeWidth={1.8} className="mt-1 shrink-0" />
+                <span>
+                  <b className="font-semibold">Work held by inactive users.</b> {plural(held.requests, 'open request is', 'open requests are')} and{' '}
+                  {plural(held.onboarding_tasks, 'onboarding task is', 'onboarding tasks are')} assigned to people who can no longer sign in.
+                </span>
+              </p>
+              <Link to="/people" className="no-underline">
+                <Button variant="secondary">Review people</Button>
+              </Link>
+            </div>
+          )}
 
-          <Card className="lg:col-span-2">
-            <h2 className="mb-4 text-sm font-semibold">New hires waiting on requests</h2>
+          <section className="mt-14" aria-labelledby="insight">
+            <p className={cn(eyebrowClass, 'text-danger')}>Key insight</p>
+            <h2 id="insight" className="mt-1.5 font-serif text-[28px] leading-[1.2]">
+              New hires waiting on requests
+            </h2>
             {hires.length === 0 ? (
-              <p className="py-6 text-center text-sm text-slate-500">No new hire is waiting on a request.</p>
+              <p className="mt-4 border-t border-ink pt-4 text-[14.5px] text-muted">No new hire is waiting on a request.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                    <tr>
-                      {['New hire', 'Country', 'Request', 'Category', 'Status', 'Title'].map((h) => (
-                        <th key={h} className="px-3 py-2 font-medium">
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {hires.flatMap((h) =>
-                      h.open_requests.map((r, i) => (
-                        <tr key={r.reference}>
-                          <td className="whitespace-nowrap px-3 py-2 font-medium">{i === 0 && h.new_hire}</td>
-                          <td className="whitespace-nowrap px-3 py-2">{i === 0 && h.country}</td>
-                          <td className="px-3 py-2 font-mono text-xs">
+              <ul className="mt-5 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
+                {hires.map((h) => (
+                  <li key={h.new_hire}>
+                    <Card variant="attention">
+                      <div className="flex items-center gap-3">
+                        <Avatar name={h.new_hire} />
+                        <div>
+                          <p className="text-[15px] font-semibold">{h.new_hire}</p>
+                          <p className="text-[13px] text-muted">{h.country}</p>
+                        </div>
+                      </div>
+                      <ul className="mt-3">
+                        {h.open_requests.map((r) => (
+                          <li key={r.reference} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line py-2.5 first:border-t-0">
                             <Link
                               to={`/requests/${Number(r.reference.slice(4))}`}
-                              className="text-indigo-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                              className="text-[13px] font-semibold tabular-nums text-muted no-underline hover:text-ink"
                             >
                               {r.reference}
                             </Link>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2">{r.category}</td>
-                          <td className="px-3 py-2">
+                            <span className="min-w-0 flex-1 text-sm">
+                              {r.title ?? (
+                                <span className="inline-flex items-center gap-1.5 italic text-muted">
+                                  <Lock aria-hidden size={14} strokeWidth={1.8} />
+                                  Confidential request
+                                </span>
+                              )}
+                            </span>
                             <StatusBadge status={r.status} />
-                          </td>
-                          <td className="px-3 py-2">{r.title ?? <span className="italic text-slate-400">Confidential request</span>}</td>
-                        </tr>
-                      )),
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </Card>
+                  </li>
+                ))}
+              </ul>
             )}
-          </Card>
-
-          {(held.requests > 0 || held.onboarding_tasks > 0) && (
-            <Card className="!border-amber-200 !bg-amber-50 lg:col-span-2">
-              <h2 className="text-sm font-semibold text-amber-900">Work held by inactive users</h2>
-              <p className="mt-1 text-sm text-amber-900">
-                {held.requests} open requests and {held.onboarding_tasks} onboarding tasks are assigned to people who can no longer log in.
-                Reassign them.
-              </p>
-            </Card>
-          )}
+          </section>
         </>
       )}
     </QueryBoundary>
+  )
+}
+
+function CountBars({ title, subtitle, data }: { title: string; subtitle: string; data: { label: string; count: number }[] }) {
+  return (
+    <ChartCard title={title} subtitle={subtitle} rows={Math.max(data.length, 1)}>
+      <BarChart data={data} layout="vertical" margin={{ top: 0, right: 36, bottom: 0, left: 0 }} barCategoryGap={12}>
+        <XAxis hide type="number" />
+        <YAxis type="category" dataKey="label" width={128} axisLine={false} tickLine={false} tick={tick} interval={0} />
+        <Bar dataKey="count" name="Count" barSize={8} radius={1} fill="var(--color-ink)" isAnimationActive={animate}>
+          <LabelList dataKey="count" position="right" {...barLabel} />
+        </Bar>
+      </BarChart>
+    </ChartCard>
+  )
+}
+
+function StatusBar({ report }: { report: RequestsReport }) {
+  const counts = openStatuses.map((s) => ({ s, count: report.by_status.find((g) => g.label === s)?.count ?? 0 }))
+  const total = counts.reduce((sum, c) => sum + c.count, 0)
+  return (
+    <ChartCard title="Open requests by status" subtitle={`${total} requests, in workflow order`}>
+      <div aria-hidden className="flex h-3.5 gap-0.5">
+        {counts
+          .filter((c) => c.count > 0)
+          .map((c) => (
+            <span key={c.s} style={{ flexGrow: c.count, background: statusColor[c.s] }} className="min-w-1 rounded-[1px]" />
+          ))}
+      </div>
+      <ul className="mt-5 grid grid-cols-1 gap-x-8 gap-y-2.5 sm:grid-cols-2">
+        {counts.map((c) => (
+          <li key={c.s} className="flex items-center justify-between gap-3 text-sm">
+            <StatusBadge status={c.s} />
+            <b className="font-semibold tabular-nums">{c.count}</b>
+          </li>
+        ))}
+      </ul>
+    </ChartCard>
+  )
+}
+
+function Charts() {
+  const headcount = useReport<HeadcountReport>('headcount')
+  const requests = useReport<RequestsReport>('requests')
+  const insights = useReport<InsightsReport>('insights')
+  return (
+    <div className="mt-14 grid grid-cols-1 gap-x-12 gap-y-12 lg:grid-cols-2">
+      <QueryBoundary query={headcount}>
+        {(h) => (
+          <>
+            <CountBars title="Headcount by country" subtitle="People per country" data={h.by_country} />
+            <CountBars title="Headcount by department" subtitle="People per department" data={h.by_department} />
+          </>
+        )}
+      </QueryBoundary>
+      <QueryBoundary query={requests}>
+        {(r) => (
+          <>
+            <StatusBar report={r} />
+            <CountBars title="Open requests by category" subtitle="Requests that are not closed" data={r.by_category} />
+          </>
+        )}
+      </QueryBoundary>
+      <QueryBoundary query={insights}>
+        {({ onboarding_completion_by_country: completion }) => (
+          <ChartCard title="Onboarding completion by country" subtitle="Share of onboarding tasks completed" rows={Math.max(completion.length, 1)}>
+            <BarChart
+              data={completion.map((c) => ({ ...c, percent: Math.round(c.rate * 100) }))}
+              layout="vertical"
+              margin={{ top: 0, right: 44, bottom: 0, left: 0 }}
+              barCategoryGap={12}
+            >
+              <XAxis hide type="number" domain={[0, 100]} />
+              <YAxis type="category" dataKey="country" width={128} axisLine={false} tickLine={false} tick={tick} interval={0} />
+              <Bar
+                dataKey="percent"
+                name="Completed"
+                barSize={8}
+                radius={1}
+                fill="var(--color-accent)"
+                background={{ fill: 'var(--color-n-150)', radius: 1 }}
+                isAnimationActive={animate}
+              >
+                <LabelList dataKey="percent" position="right" formatter={(v) => `${v}%`} {...barLabel} />
+              </Bar>
+            </BarChart>
+          </ChartCard>
+        )}
+      </QueryBoundary>
+    </div>
   )
 }
 
 export function DashboardPage() {
+  const { user } = useAuth()
+  const requests = useReport<RequestsReport>('requests')
+  const onboarding = useReport<OnboardingReport>('onboarding')
+  const insights = useReport<InsightsReport>('insights')
+
+  let lede
+  if (requests.data && onboarding.data && insights.data) {
+    const overdue = onboarding.data.overdue_tasks
+    const waiting = insights.data.new_hires_with_open_requests.length
+    const overdueText = overdue === 0 ? 'No onboarding tasks are overdue' : `${plural(overdue, 'onboarding task is', 'onboarding tasks are')} overdue`
+    const waitingText = waiting === 0 ? '' : `, and ${plural(waiting, 'new hire is', 'new hires are')} still waiting on requests of their own`
+    lede = `${plural(requests.data.open_total, 'request is', 'requests are')} open. ${overdueText}${waitingText}.`
+  }
+
   return (
     <div className="mx-auto max-w-6xl">
-      <PageHeader
-        title="Dashboard"
-        subtitle="Open means every request that is not closed. Unresolved means submitted, assigned or in progress."
-      />
-      <Kpis />
-      {/* grid-cols-1 gives the column a zero minimum, so a chart can shrink to a phone's width. */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <HeadcountCharts />
-        <RequestCharts />
-        <Insights />
-      </div>
+      <PageHeader eyebrow={`People operations · ${today()}`} title={greeting(user?.full_name ?? '')} subtitle={lede} />
+      <Metrics />
+      <Attention />
+      <Charts />
     </div>
   )
 }

@@ -2,12 +2,9 @@ import { useState, type FormEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import { ApiError } from '../../api/client'
 import { Button } from '../../components/Button'
-import { Card } from '../../components/Card'
+import { Field, Input } from '../../components/Fields'
 import { useAuth } from './AuthContext'
 import { homePath } from './roles'
-
-const inputClass =
-  'mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30'
 
 export function LoginPage() {
   const { user, login } = useAuth()
@@ -31,48 +28,42 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
+    <div className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">
-        <h1 className="mb-6 text-center text-2xl font-semibold tracking-tight text-indigo-600">PeopleDesk</h1>
-        <Card>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <label className="block text-sm font-medium text-slate-700">
-              Email
-              <input
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className={inputClass}
-              />
-            </label>
-            <label className="block text-sm font-medium text-slate-700">
-              Password
-              <input
-                type="password"
-                required
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={inputClass}
-              />
-            </label>
-            {error && (
-              <p role="alert" className="text-sm text-red-600">
-                {error}
-              </p>
-            )}
-            <Button type="submit" loading={loading} className="w-full">
-              Sign in
-            </Button>
-            {loading && (
-              <p className="text-center text-xs text-slate-500">
-                The server sleeps when idle. The first sign-in can take up to a minute.
-              </p>
-            )}
-          </form>
-        </Card>
+        <div className="mb-8 flex items-center gap-2.5">
+          <span aria-hidden className="grid size-[30px] place-items-center bg-ink font-serif text-lg text-paper">
+            p.
+          </span>
+          <span className="font-serif text-xl">PeopleDesk</span>
+        </div>
+        <h1 className="mb-6 font-serif text-[32px] font-normal leading-[1.1] tracking-[-0.02em]">Sign in</h1>
+        <form onSubmit={onSubmit} className="flex flex-col gap-4 border-t border-ink pt-6">
+          <Field label="Email">
+            <Input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+          <Field label="Password">
+            <Input
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </Field>
+          {error && (
+            <p role="alert" className="text-[13px] font-medium text-danger">
+              {error}
+            </p>
+          )}
+          <Button type="submit" loading={loading} className="w-full">
+            Sign in
+          </Button>
+          {loading && (
+            <p className="text-center text-[13px] text-muted">
+              The server sleeps when idle. The first sign-in can take up to a minute.
+            </p>
+          )}
+        </form>
       </div>
     </div>
   )

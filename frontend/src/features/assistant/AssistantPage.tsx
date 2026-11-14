@@ -1,10 +1,13 @@
 import { useState, type KeyboardEvent } from 'react'
+import { Send } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { AiAnswer, ToolUse } from '../../api/types'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
-import { PageHeader } from '../../components/PageHeader'
+import { Textarea } from '../../components/Fields'
+import { PageHeader, eyebrowClass } from '../../components/PageHeader'
+import { Table, Td, Th } from '../../components/Table'
 import { Spinner } from '../../components/Spinner'
 
 const MAX = 500
@@ -41,43 +44,43 @@ function Tool({ tool }: { tool: ToolUse }) {
   const filters = Object.entries(tool.arguments).filter(([, v]) => v != null)
   const columns = Object.keys(tool.rows[0] ?? {})
   return (
-    <div className="rounded-md border border-slate-200 p-3">
-      <p className="text-sm font-medium">{toolName(tool.name)}</p>
+    <div className="border-t border-line py-3 first:border-t-0 first:pt-0">
+      <p className="font-mono text-[12.5px] leading-relaxed">{tool.name}</p>
       {filters.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {filters.map(([k, v]) => (
-            <Badge key={k} tone="bg-slate-100 text-slate-700">
+            <Badge key={k}>
               {k}: {cell(v)}
             </Badge>
           ))}
         </div>
       )}
       {columns.length === 0 ? (
-        <p className="mt-2 text-sm text-slate-500">No rows</p>
+        <p className="mt-2 text-[13px] text-muted">No rows</p>
       ) : (
-        <div className="mt-2 max-h-60 overflow-auto rounded-md border border-slate-200">
-          <table className="w-full text-left text-xs">
-            <thead className="sticky top-0 bg-slate-50 text-slate-500">
+        <div className="mt-3 max-h-60 overflow-auto">
+          <Table>
+            <thead>
               <tr>
                 {columns.map((c) => (
-                  <th key={c} className="whitespace-nowrap px-3 py-2 font-medium">
+                  <Th key={c} className="whitespace-nowrap">
                     {toolName(c)}
-                  </th>
+                  </Th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {tool.rows.map((row, i) => (
                 <tr key={i}>
                   {columns.map((c) => (
-                    <td key={c} className="whitespace-nowrap px-3 py-2">
+                    <Td key={c} className="whitespace-nowrap py-2 text-[13px]">
                       {cell(row[c])}
-                    </td>
+                    </Td>
                   ))}
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
       )}
     </div>
@@ -86,46 +89,38 @@ function Tool({ tool }: { tool: ToolUse }) {
 
 function Turn({ item, pending, onRetry }: { item: Exchange; pending: boolean; onRetry: () => void }) {
   return (
-    <div className="space-y-3">
-      <p className="ml-auto w-fit max-w-[90%] whitespace-pre-wrap break-words rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white">
-        {item.question}
-      </p>
-      <Card>
+    <section className="border-t border-ink pt-4">
+      <h3 className="whitespace-pre-wrap break-words font-serif text-[21px] leading-snug">{item.question}</h3>
+      <div className="mt-3">
         {pending ? (
-          <p role="status" className="flex items-center gap-2 text-sm text-slate-600">
-            <Spinner className="size-4 text-indigo-600" />
-            Looking at the data...
+          <p role="status" className="flex items-center gap-2.5 text-sm text-muted">
+            <Spinner />
+            Looking at the data…
           </p>
         ) : item.error ? (
-          <>
-            <p role="alert" className="text-sm text-red-600">
-              {item.error}
-            </p>
-            <Button variant="secondary" className="mt-3" onClick={onRetry}>
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+            <p>{item.error}</p>
+            <Button variant="secondary" size="sm" onClick={onRetry}>
               Try again
             </Button>
-          </>
+          </div>
         ) : (
           item.answer && (
             <>
-              <p className="whitespace-pre-wrap text-sm">{item.answer.answer}</p>
+              <p className="whitespace-pre-wrap text-[14.5px] leading-[1.55]">{item.answer.answer}</p>
               {item.answer.tools_used.length > 0 && (
-                <details open className="mt-4">
-                  <summary className="cursor-pointer text-sm font-medium text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
-                    How this was answered
-                  </summary>
-                  <div className="mt-3 space-y-3">
-                    {item.answer.tools_used.map((t, i) => (
-                      <Tool key={i} tool={t} />
-                    ))}
-                  </div>
-                </details>
+                <Card variant="boxed" className="mt-4">
+                  <p className={`${eyebrowClass} mb-3`}>How this was answered</p>
+                  {item.answer.tools_used.map((t, i) => (
+                    <Tool key={i} tool={t} />
+                  ))}
+                </Card>
               )}
             </>
           )
         )}
-      </Card>
-    </div>
+      </div>
+    </section>
   )
 }
 
@@ -162,25 +157,23 @@ export function AssistantPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader title="Assistant" subtitle="Ask a question about people, requests and onboarding." />
+      <PageHeader eyebrow="Assistant" title="Ask about your people data" subtitle="Ask a question about people, requests and onboarding." />
 
       {thread.length === 0 ? (
-        <Card className="mb-4">
-          <p className="mb-3 text-sm font-medium text-slate-700">Try one of these</p>
-          <div className="flex flex-wrap gap-2">
+        <section className="mb-10 border-t border-ink pt-4">
+          <h2 className="font-serif text-[21px] leading-snug">Try one of these</h2>
+          <ul className="mt-3 flex flex-col items-start gap-2">
             {examples.map((q) => (
-              <button
-                key={q}
-                onClick={() => send(q)}
-                className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-              >
-                {q}
-              </button>
+              <li key={q}>
+                <Button variant="secondary" className="h-auto py-2 text-left font-medium whitespace-normal!" onClick={() => send(q)}>
+                  {q}
+                </Button>
+              </li>
             ))}
-          </div>
-        </Card>
+          </ul>
+        </section>
       ) : (
-        <div className="mb-4 space-y-6">
+        <div className="mb-10 flex flex-col gap-10">
           {thread.map((item) => (
             <Turn key={item.id} item={item} pending={item.id === pendingId} onRetry={() => ask(item.id, item.question)} />
           ))}
@@ -192,9 +185,9 @@ export function AssistantPage() {
           e.preventDefault()
           send(text)
         }}
-        className="space-y-2"
+        className="flex flex-col gap-2"
       >
-        <textarea
+        <Textarea
           aria-label="Your question"
           rows={3}
           maxLength={MAX}
@@ -202,17 +195,17 @@ export function AssistantPage() {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder="Ask a question"
-          className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
         />
         <div className="flex items-center justify-between gap-3">
-          <span className="text-xs text-slate-500">
+          <span className="text-[13px] tabular-nums text-muted">
             {text.length} / {MAX}
           </span>
           <Button type="submit" disabled={!text.trim() || pendingId !== null}>
+            <Send aria-hidden size={16} strokeWidth={1.8} />
             Send
           </Button>
         </div>
-        <p className="text-xs text-slate-500">
+        <p className="text-[13px] text-muted">
           Answers come from live platform data through a fixed set of read-only queries. Check the rows shown with each answer.
         </p>
       </form>

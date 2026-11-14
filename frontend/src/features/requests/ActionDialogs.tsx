@@ -1,9 +1,13 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { Check } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import type { RequestAction, RequestDetail, UserSummary } from '../../api/types'
-import { Field, Input, Select, Textarea } from '../../components/Fields'
+import { Avatar } from '../../components/Avatar'
+import { ChipGroup } from '../../components/ChipGroup'
+import { Field, SearchInput, Textarea } from '../../components/Fields'
 import { FormDialog as Form } from '../../components/FormDialog'
+import { cn } from '../../lib/cn'
 import { label } from '../../lib/format'
 import { useCategories, useDepartments } from './queries'
 
@@ -30,7 +34,14 @@ function TransitionDialog({ request, action, onClose, onDone, onError }: Props) 
   })
 
   return (
-    <Form title={`${label(action)} request`} onClose={onClose} onSubmit={mutation.mutate} pending={mutation.isPending}>
+    <Form
+      title={`${label(action)} request`}
+      eyebrow={request.reference}
+      submitLabel={label(action)}
+      onClose={onClose}
+      onSubmit={mutation.mutate}
+      pending={mutation.isPending}
+    >
       <Field label={required ? 'Note' : 'Note (optional)'}>
         <Textarea required={required} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>
@@ -47,7 +58,7 @@ function AssignDialog({ request, action, onClose, onDone, onError }: Props) {
   const department = picked ?? (owner ? String(owner) : '')
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [assigneeId, setAssigneeId] = useState<number>()
+  const [chosen, setChosen] = useState<UserSummary>()
   const [note, setNote] = useState('')
 
   useEffect(() => {
@@ -66,7 +77,7 @@ function AssignDialog({ request, action, onClose, onDone, onError }: Props) {
   })
 
   const mutation = useMutation({
-    mutationFn: () => post(request.id, action, { assignee_id: assigneeId, note: note.trim() || null }),
+    mutationFn: () => post(request.id, action, { assignee_id: chosen?.id, note: note.trim() || null }),
     onSuccess: onDone,
     onError,
   })
@@ -74,56 +85,62 @@ function AssignDialog({ request, action, onClose, onDone, onError }: Props) {
   return (
     <Form
       title={`${label(action)} request`}
+      eyebrow={request.reference}
+      submitLabel={chosen ? `${label(action)} to ${chosen.full_name}` : label(action)}
       onClose={onClose}
       onSubmit={mutation.mutate}
       pending={mutation.isPending}
-      disabled={!assigneeId}
+      disabled={!chosen}
     >
-      <Field label="Department">
-        <Select value={department} onChange={(e) => setDepartment(e.target.value)}>
-          <option value="">Everyone</option>
-          {departments?.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      <Field label="Search by name">
-        <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} />
-      </Field>
-      <fieldset>
-        <legend className="text-sm font-medium text-slate-700">Assignee</legend>
-        <div className="mt-1 max-h-48 overflow-y-auto rounded-md border border-slate-300">
-          {people.isPending ? (
-            <p className="p-3 text-sm text-slate-500">Loading people...</p>
-          ) : people.isError ? (
-            <p role="alert" className="p-3 text-sm text-red-600">
-              {people.error.message}
-            </p>
-          ) : people.data.length === 0 ? (
-            <p className="p-3 text-sm text-slate-500">No people found.</p>
-          ) : (
-            people.data.map((u) => (
-              <label key={u.id} className="flex cursor-pointer items-start gap-3 px-3 py-2 text-sm hover:bg-slate-50">
-                <input
-                  type="radio"
-                  name="assignee"
-                  checked={assigneeId === u.id}
-                  onChange={() => setAssigneeId(u.id)}
-                  className="mt-1 accent-indigo-600"
-                />
-                <span>
-                  <span className="block font-medium">{u.full_name}</span>
-                  <span className="block text-xs text-slate-500">
+      <ChipGroup
+        label="Department"
+        value={department}
+        onChange={setDepartment}
+        options={[{ value: '', label: 'Everyone' }, ...(departments ?? []).map((d) => ({ value: String(d.id), label: d.name }))]}
+      />
+      <SearchInput placeholder="Search by name" aria-label="Search by name" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div role="radiogroup" aria-label="Assignee" className="max-h-[300px] overflow-y-auto border-t border-ink">
+        {people.isPending ? (
+          <p className="p-6 text-sm text-n-600">Loading people…</p>
+        ) : people.isError ? (
+          <p role="alert" className="p-6 text-sm text-danger">
+            {people.error.message}
+          </p>
+        ) : people.data.length === 0 ? (
+          <p className="p-6 text-sm text-n-600">No one matches. Try another department or name.</p>
+        ) : (
+          people.data.map((u) => {
+            const checked = chosen?.id === u.id
+            return (
+              <button
+                key={u.id}
+                type="button"
+                role="radio"
+                aria-checked={checked}
+                onClick={() => setChosen(u)}
+                className={cn(
+                  'grid min-h-14 w-full grid-cols-[36px_1fr_auto] items-center gap-3 border-b border-l-[3px] border-b-line border-l-transparent py-2 pl-[11px] pr-3.5 text-left hover:bg-[#f0f2ec]',
+                  checked && 'border-l-accent bg-accent-soft',
+                )}
+              >
+                <Avatar name={u.full_name} active={checked} />
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2 text-[14.5px] font-semibold">
+                    {u.full_name}
+                    {request.assignee?.id === u.id && (
+                      <span className="rounded-xs border border-control px-1.5 text-[11px] font-bold uppercase">Current</span>
+                    )}
+                  </span>
+                  <span className="block text-[12.5px] text-muted">
                     {u.job_title} · {u.department.name}
                   </span>
                 </span>
-              </label>
-            ))
-          )}
-        </div>
-      </fieldset>
+                {checked && <Check aria-hidden size={16} strokeWidth={1.8} className="text-accent" />}
+              </button>
+            )
+          })
+        )}
+      </div>
       <Field label="Note (optional)">
         <Textarea rows={3} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>

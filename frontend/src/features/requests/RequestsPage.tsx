@@ -1,14 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { Page, RequestSummary, Role } from '../../api/types'
 import { Button } from '../../components/Button'
-import { Card } from '../../components/Card'
-import { Input, Select } from '../../components/Fields'
+import { SearchInput } from '../../components/Fields'
+import { FilterMenu } from '../../components/FilterMenu'
 import { PageHeader } from '../../components/PageHeader'
 import { PriorityBadge, StatusBadge } from '../../components/RequestBadges'
-import { Spinner } from '../../components/Spinner'
+import { EmptyState, ErrorState, LoadingState } from '../../components/States'
+import { RowLink, Table, Td, Th } from '../../components/Table'
+import { Tabs } from '../../components/Tabs'
 import { formatDate, label, priorities, statuses } from '../../lib/format'
 import { useAuth } from '../auth/AuthContext'
 import { useCategories, useCountries } from './queries'
@@ -27,7 +30,6 @@ const tabsByRole: Record<Role, { view: string; text: string }[]> = {
 
 const filterKeys = ['status', 'category_id', 'priority', 'country', 'search']
 const headings = ['Reference', 'Title', 'Category', 'Priority', 'Status', 'Requester', 'Assignee', 'Created']
-const tight = '!mt-0'
 
 export function RequestsPage() {
   const { user } = useAuth()
@@ -67,150 +69,128 @@ export function RequestsPage() {
     return () => clearTimeout(id)
   })
 
-  const filterSelect = (key: string, name: string, options: { value: string; text: string }[]) => (
-    <Select aria-label={name} value={params.get(key) ?? ''} onChange={(e) => update({ [key]: e.target.value })} className={tight}>
-      <option value="">All {name.toLowerCase()}</option>
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.text}
-        </option>
-      ))}
-    </Select>
+  const filter = (key: string, name: string, options: { value: string; label: string }[]) => (
+    <FilterMenu label={name} value={params.get(key) ?? ''} options={options} onChange={(value) => update({ [key]: value })} />
+  )
+
+  const newRequest = (
+    <Button onClick={() => navigate('/requests/new')}>
+      <Plus aria-hidden size={16} strokeWidth={1.8} />
+      New request
+    </Button>
   )
 
   const data = list.data
   const pages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <div className="flex items-start justify-between gap-4">
-        <PageHeader title="Requests" subtitle="Ask for help and follow it through to the end." />
-        <Button onClick={() => navigate('/requests/new')} className="shrink-0">
-          New request
-        </Button>
-      </div>
+    <div>
+      <PageHeader
+        eyebrow="Service requests"
+        title="Requests"
+        subtitle="Ask for help and follow it through to the end."
+        actions={newRequest}
+      />
 
-      <div role="tablist" className="mb-4 flex gap-1 overflow-x-auto border-b border-slate-200">
-        {tabs.map((t) => (
-          <button
-            key={t.view}
-            role="tab"
-            aria-selected={view === t.view}
-            onClick={() => update({ view: t.view })}
-            className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
-              view === t.view ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            {t.text}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        label="Request views"
+        value={view}
+        onChange={(value) => update({ view: value })}
+        tabs={tabs.map((t) => ({ value: t.view, label: t.text }))}
+      />
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Input
-          type="search"
-          placeholder="Search by title"
-          aria-label="Search by title"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className={tight}
-        />
-        {filterSelect('status', 'Statuses', statuses.map((s) => ({ value: s, text: label(s) })))}
-        {filterSelect('category_id', 'Categories', (categories.data ?? []).map((c) => ({ value: String(c.id), text: c.name })))}
-        {filterSelect('priority', 'Priorities', priorities.map((p) => ({ value: p, text: label(p) })))}
-        {isAdmin && filterSelect('country', 'Countries', (countries.data ?? []).map((c) => ({ value: c.code, text: c.name })))}
+      <div className="my-5 flex flex-wrap items-center gap-2">
+        <div className="w-full md:w-64">
+          <SearchInput
+            placeholder="Search by title"
+            aria-label="Search by title"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        {filter('status', 'Status', statuses.map((s) => ({ value: s, label: label(s) })))}
+        {filter('category_id', 'Category', (categories.data ?? []).map((c) => ({ value: String(c.id), label: c.name })))}
+        {filter('priority', 'Priority', priorities.map((p) => ({ value: p, label: label(p) })))}
+        {isAdmin && filter('country', 'Country', (countries.data ?? []).map((c) => ({ value: c.code, label: c.name })))}
       </div>
 
       {list.isPending ? (
-        <div className="flex justify-center py-16 text-indigo-600">
-          <Spinner />
-        </div>
+        <LoadingState />
       ) : list.isError || !data ? (
-        <Card>
-          <p role="alert" className="text-sm text-red-600">
-            {list.error?.message}
-          </p>
-          <Button variant="secondary" className="mt-3" onClick={() => list.refetch()}>
-            Try again
-          </Button>
-        </Card>
+        <ErrorState message={list.error?.message ?? 'Something went wrong'} onRetry={() => list.refetch()} />
       ) : data.items.length === 0 ? (
-        <Card className="py-12 text-center text-sm text-slate-500">No requests match these filters.</Card>
+        <EmptyState title="No requests match" help="Try clearing a filter or switching to another view." action={newRequest} />
       ) : (
         <>
-          <ul className="space-y-3 md:hidden">
+          <ul className="border-t border-ink md:hidden">
             {data.items.map((r) => (
               <li key={r.id}>
-                <Link
-                  to={`/requests/${r.id}`}
-                  className="block rounded-lg border border-slate-200 bg-white p-4 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                <button
+                  type="button"
+                  onClick={() => navigate(`/requests/${r.id}`)}
+                  className="flex w-full flex-col gap-2 border-b border-line py-4 text-left"
                 >
-                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
-                    <span className="font-mono">{r.reference}</span>
-                    <span>{formatDate(r.created_at)}</span>
-                  </div>
-                  <p className="mt-1 font-medium">{r.title}</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <span className="flex items-center justify-between gap-2 text-[13px] text-muted">
+                    <span>
+                      <span className="font-semibold tabular-nums">{r.reference}</span> ·{' '}
+                      <span className="tabular-nums">{formatDate(r.created_at)}</span>
+                    </span>
                     <StatusBadge status={r.status} />
+                  </span>
+                  <span className="text-base font-semibold">{r.title}</span>
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <PriorityBadge priority={r.priority} />
-                  </div>
-                  <p className="mt-2 text-xs text-slate-500">
-                    {r.category.name} · {r.requester.full_name} · {r.assignee?.full_name ?? 'Unassigned'}
-                  </p>
-                </Link>
+                    <span className="text-[13px] text-muted">{r.category.name}</span>
+                  </span>
+                  <span className="text-[13px] text-muted">
+                    {r.requester.full_name} → {r.assignee ? r.assignee.full_name : <span className="italic">Unassigned</span>}
+                  </span>
+                </button>
               </li>
             ))}
           </ul>
 
-          <div className="hidden overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm md:block">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <div className="hidden md:block">
+            <Table>
+              <thead>
                 <tr>
                   {headings.map((h) => (
-                    <th key={h} className="px-4 py-3 font-medium">
+                    <Th key={h} className={h === 'Created' ? 'text-right' : undefined}>
                       {h}
-                    </th>
+                    </Th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody>
                 {data.items.map((r) => (
-                  <tr key={r.id} onClick={() => navigate(`/requests/${r.id}`)} className="cursor-pointer hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs">
-                      <Link
-                        to={`/requests/${r.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-indigo-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                      >
-                        {r.reference}
-                      </Link>
-                    </td>
-                    <td className="max-w-xs truncate px-4 py-3 font-medium">{r.title}</td>
-                    <td className="px-4 py-3">{r.category.name}</td>
-                    <td className="px-4 py-3">
+                  <RowLink key={r.id} onOpen={() => navigate(`/requests/${r.id}`)}>
+                    <Td className="w-24 text-[13px] font-semibold tabular-nums text-muted">{r.reference}</Td>
+                    <Td className="font-semibold">{r.title}</Td>
+                    <Td>{r.category.name}</Td>
+                    <Td>
                       <PriorityBadge priority={r.priority} />
-                    </td>
-                    <td className="px-4 py-3">
+                    </Td>
+                    <Td>
                       <StatusBadge status={r.status} />
-                    </td>
-                    <td className="px-4 py-3">{r.requester.full_name}</td>
-                    <td className="px-4 py-3">{r.assignee?.full_name ?? <span className="text-slate-400">Unassigned</span>}</td>
-                    <td className="whitespace-nowrap px-4 py-3">{formatDate(r.created_at)}</td>
-                  </tr>
+                    </Td>
+                    <Td>{r.requester.full_name}</Td>
+                    <Td>{r.assignee?.full_name ?? <span className="italic text-muted">Unassigned</span>}</Td>
+                    <Td className="whitespace-nowrap text-right tabular-nums">{formatDate(r.created_at)}</Td>
+                  </RowLink>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </div>
 
-          <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
-            <span>
+          <div className="mt-5 flex items-center justify-between gap-3 text-[13px] text-muted">
+            <span className="tabular-nums">
               Page {data.page} of {pages} · {data.total} requests
             </span>
             <div className="flex gap-2">
-              <Button variant="secondary" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
+              <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
                 Previous
               </Button>
-              <Button variant="secondary" disabled={page >= pages} onClick={() => update({ page: String(page + 1) })}>
+              <Button variant="secondary" size="sm" disabled={page >= pages} onClick={() => update({ page: String(page + 1) })}>
                 Next
               </Button>
             </div>
