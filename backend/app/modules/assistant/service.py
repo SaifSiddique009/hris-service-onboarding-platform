@@ -13,8 +13,8 @@ from app.modules.users.models import Country, Department, User
 MAX_TOOL_ROUNDS = 3
 MAX_CALLS_PER_ROUND = 4
 OUT_OF_SCOPE = (
-    "I could not work that out from the platform's data. I can answer questions about employee "
-    "headcount, service requests and onboarding progress."
+    "I can only answer questions about this platform's data: employee headcount, service "
+    'requests and onboarding progress. For example: "How many requests are unresolved in Cyprus?"'
 )
 INSTRUCTIONS = """You answer questions from an HR administrator about a company's internal \
 platform, using only the tools provided. Today is {today}.
@@ -84,7 +84,9 @@ def _converse(db: Session, question: str, used: list[dict]) -> str:
         message = llm.chat(messages, tools.SCHEMAS)
         calls = (message.get("tool_calls") or [])[:MAX_CALLS_PER_ROUND]
         if not calls:
-            return message.get("content") or OUT_OF_SCOPE
+            # No tool was used, so nothing here came from the platform: jokes, code and
+            # general knowledge all end up as the same fixed reply.
+            return (message.get("content") if used else None) or OUT_OF_SCOPE
         messages.append(
             {"role": "assistant", "content": message.get("content"), "tool_calls": calls}
         )
