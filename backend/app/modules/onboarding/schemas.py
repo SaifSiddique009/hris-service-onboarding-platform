@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
-from app.core.schemas import Out
+from app.core.schemas import In, Out
 from app.modules.onboarding.models import DeadlineUnit, TaskOwnerKind, TaskStatus
 from app.modules.users.schemas import DepartmentRef, UserSummary
 
@@ -38,18 +38,18 @@ class TemplateRef(Out):
     name: str
 
 
-class TemplateCreate(BaseModel):
+class TemplateCreate(In):
     name: str = Field(min_length=3, max_length=120)
     description: str = Field(min_length=3, max_length=1000)
 
 
-class TemplateUpdate(BaseModel):
+class TemplateUpdate(In):
     name: str | None = Field(None, min_length=3, max_length=120)
     description: str | None = Field(None, min_length=3, max_length=1000)
     is_active: bool | None = None
 
 
-class TemplateTaskCreate(BaseModel):
+class TemplateTaskCreate(In):
     title: str = Field(min_length=3, max_length=200)
     description: str = Field(min_length=3, max_length=2000)
     owner_kind: TaskOwnerKind
@@ -60,7 +60,7 @@ class TemplateTaskCreate(BaseModel):
     sort_order: int | None = None
 
 
-class TemplateTaskUpdate(BaseModel):
+class TemplateTaskUpdate(In):
     title: str | None = Field(None, min_length=3, max_length=200)
     description: str | None = Field(None, min_length=3, max_length=2000)
     owner_kind: TaskOwnerKind | None = None
@@ -132,16 +132,16 @@ class ChecklistCreated(ChecklistDetail):
     warnings: list[str] = []
 
 
-class ChecklistCreate(BaseModel):
+class ChecklistCreate(In):
     employee_id: int
     template_id: int
     start_date: date | None = None
 
 
-class TaskTransitionIn(BaseModel):
+class TaskTransitionIn(In):
     action: str
 
 
-class TaskUpdate(BaseModel):
+class TaskUpdate(In):
     assignee_id: int | None = None
     due_date: date | None = None

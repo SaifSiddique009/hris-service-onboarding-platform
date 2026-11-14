@@ -1,9 +1,9 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, Field, StringConstraints, computed_field
+from pydantic import Field, StringConstraints, computed_field
 
-from app.core.schemas import Out
+from app.core.schemas import In, Out
 from app.modules.requests.models import ClosureReason, RequestPriority, RequestStatus
 from app.modules.users.schemas import DepartmentRef, UserSummary
 
@@ -69,22 +69,22 @@ class RequestDetail(RequestSummary):
     allowed_actions: list[str] = []
 
 
-class RequestCreate(BaseModel):
+class RequestCreate(In):
     title: str = Field(min_length=3, max_length=200)
     description: str = Field(min_length=3, max_length=4000)
     category_id: int
     priority: RequestPriority
 
 
-class AssignIn(BaseModel):
+class AssignIn(In):
     assignee_id: int
     note: str | None = Field(None, max_length=1000)
 
 
-class TransitionIn(BaseModel):
+class TransitionIn(In):
     action: str
     note: str | None = Field(None, max_length=1000)
 
 
-class CommentIn(BaseModel):
+class CommentIn(In):
     body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]

@@ -3,6 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import Conflict, Invalid, NotFound
+from app.core.schemas import contains
 from app.core.security import hash_password
 from app.modules.onboarding import service as onboarding
 from app.modules.requests import service as requests
@@ -37,8 +38,8 @@ def list_users(db: Session, viewer: User, filters: dict, page: int, page_size: i
     if filters.get("country"):
         query = query.where(User.country_code == filters["country"].upper())
     if filters.get("search"):
-        like = f"%{filters['search']}%"
-        query = query.where(or_(User.full_name.ilike(like), User.email.ilike(like)))
+        text = filters["search"]
+        query = query.where(or_(contains(User.full_name, text), contains(User.email, text)))
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     rows = db.scalars(
         query.order_by(User.full_name).offset((page - 1) * page_size).limit(page_size)
@@ -51,7 +52,7 @@ def lookup_users(db: Session, department_id: int | None, search: str | None) -> 
     if department_id:
         query = query.where(User.department_id == department_id)
     if search:
-        query = query.where(User.full_name.ilike(f"%{search}%"))
+        query = query.where(contains(User.full_name, search))
     return list(db.scalars(query.order_by(User.full_name).limit(50)))
 
 

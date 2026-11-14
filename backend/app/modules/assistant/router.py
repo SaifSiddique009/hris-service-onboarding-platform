@@ -2,12 +2,13 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.core.deps import CurrentUser, Db, require_admin
+from app.core.schemas import In
 from app.modules.assistant import service
 
 router = APIRouter(prefix="/ai", tags=["ai"], dependencies=[require_admin])
 
 
-class QuestionIn(BaseModel):
+class QuestionIn(In):
     question: str = Field(min_length=1, max_length=500)
 
 

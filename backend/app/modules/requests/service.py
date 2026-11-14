@@ -4,6 +4,7 @@ from sqlalchemy import Select, and_, false, func, or_, select, true
 from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.core.errors import Conflict, Invalid, NotFound
+from app.core.schemas import contains
 from app.core.transitions import Action, allowed_actions, check_action
 from app.modules.requests.models import (
     ClosureReason,
@@ -105,7 +106,7 @@ def list_requests(db: Session, user: User, view: str, filters: dict, page: int, 
     if filters.get("country"):
         query = query.where(Requester.country_code == filters["country"].upper())
     if filters.get("search"):
-        query = query.where(ServiceRequest.title.ilike(f"%{filters['search']}%"))
+        query = query.where(contains(ServiceRequest.title, filters["search"]))
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     people = [
         selectinload(relation).options(selectinload(User.department), selectinload(User.country))

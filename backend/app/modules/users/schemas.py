@@ -1,8 +1,9 @@
 from datetime import date
+from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, StringConstraints, field_validator
 
-from app.core.schemas import Out
+from app.core.schemas import In, Out
 from app.core.security import MAX_PASSWORD_BYTES
 from app.modules.users.models import EmploymentStatus, UserRole
 
@@ -44,18 +45,10 @@ class DepartmentOut(DepartmentRef):
     head: UserSummary | None
 
 
-class UserCreate(BaseModel):
+class UserCreate(In):
     full_name: str = Field(min_length=2, max_length=120)
     email: str = Field(pattern=EMAIL, max_length=200)
-    password: str = Field(min_length=8, max_length=72)
-
-    @field_validator("password")
-    @classmethod
-    def fits_bcrypt(cls, value: str) -> str:
-        if len(value.encode()) > MAX_PASSWORD_BYTES:
-            raise ValueError("Password is too long")
-        return value
-
+    password: Annotated[str, StringConstraints(strip_whitespace=False, min_length=8, max_length=72)]
     job_title: str = Field(min_length=2, max_length=120)
     role: UserRole
     country: str = Field(min_length=2, max_length=2)
@@ -64,8 +57,19 @@ class UserCreate(BaseModel):
     status: EmploymentStatus
     joining_date: date
 
+    @field_validator("password")
+    @classmethod
+    def acceptable_password(cls, value: str) -> str:
+        if len(value.encode()) > MAX_PASSWORD_BYTES:
+            raise ValueError("Password is too long")
+        if value != value.strip():
+            raise ValueError("Password cannot start or end with a space")
+        if not (any(c.isalpha() for c in value) and any(c.isdigit() for c in value)):
+            raise ValueError("Password needs at least one letter and one number")
+        return value
 
-class UserUpdate(BaseModel):
+
+class UserUpdate(In):
     full_name: str | None = Field(None, min_length=2, max_length=120)
     job_title: str | None = Field(None, min_length=2, max_length=120)
     role: UserRole | None = None
@@ -77,5 +81,5 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
 
 
-class DepartmentUpdate(BaseModel):
+class DepartmentUpdate(In):
     head_id: int | None
