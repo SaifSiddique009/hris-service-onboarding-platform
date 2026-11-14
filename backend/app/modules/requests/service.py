@@ -52,9 +52,7 @@ ACTIONS = {
     "assign": Action((S.SUBMITTED,), S.ASSIGNED, is_triager),
     "reassign": Action((S.ASSIGNED, S.IN_PROGRESS), S.ASSIGNED, is_triager),
     "withdraw": Action((S.SUBMITTED,), S.CLOSED, is_requester),
-    "reject": Action(
-        (S.SUBMITTED, S.ASSIGNED), S.CLOSED, lambda u, r: is_triager(u, r) or is_assignee(u, r)
-    ),
+    "reject": Action((S.SUBMITTED, S.ASSIGNED), S.CLOSED, is_triager),
     "start": Action((S.ASSIGNED,), S.IN_PROGRESS, is_assignee),
     "resolve": Action((S.IN_PROGRESS,), S.RESOLVED, is_assignee),
     "reopen": Action((S.RESOLVED,), S.IN_PROGRESS, is_requester),
@@ -105,8 +103,13 @@ def list_requests(db: Session, user: User, view: str, filters: dict, page: int, 
             query = query.where(getattr(ServiceRequest, column) == filters[column])
     if filters.get("country"):
         query = query.where(Requester.country_code == filters["country"].upper())
-    if filters.get("search"):
-        query = query.where(contains(ServiceRequest.title, filters["search"]))
+    search = (filters.get("search") or "").strip()
+    if search:
+        # "REQ-0055" or "55" finds the request by its reference as well as by title.
+        number = search.upper().removeprefix("REQ-").lstrip("0")
+        known = number.isdigit() and len(number) < 10
+        by_reference = ServiceRequest.id == int(number) if known else false()
+        query = query.where(or_(contains(ServiceRequest.title, search), by_reference))
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     people = [
         selectinload(relation).options(selectinload(User.department), selectinload(User.country))
@@ -137,16 +140,22 @@ def actions_for(user: User, request: ServiceRequest) -> list[str]:
     return actions if request.status == S.CLOSED else [*actions, "comment"]
 
 
-def _record(db: Session, request: ServiceRequest, actor: User, previous, note: str | None) -> None:
+def _record(
+    db: Session, request: ServiceRequest, actor: User, previous, note: str | None, assignee=None
+) -> None:
     db.add(
         RequestStatusEvent(
             request=request,
             from_status=previous,
             to_status=request.status,
             actor_id=actor.id,
+            assignee_id=assignee.id if assignee else None,
             note=note,
         )
     )
+
+
+ACCOUNT_ACCESS = "Account Access"
 
 
 def create_request(db: Session, user: User, data: RequestCreate) -> ServiceRequest:
@@ -158,6 +167,35 @@ def create_request(db: Session, user: User, data: RequestCreate) -> ServiceReque
     _record(db, request, user, None, None)
     db.commit()
     return request
+
+
+def request_password_reset(db: Session, user: User) -> None:
+    """Raises a request in the person's name, asked for from the sign-in page."""
+    category = db.scalar(
+        select(RequestCategory).where(
+            RequestCategory.name == ACCOUNT_ACCESS, RequestCategory.is_active
+        )
+    )
+    if not category:
+        return
+    # One unresolved reset request per person, so repeated asks do not flood the queue.
+    unresolved = (S.SUBMITTED, S.ASSIGNED, S.IN_PROGRESS)
+    if db.scalar(
+        select(ServiceRequest.id).where(
+            ServiceRequest.requester_id == user.id,
+            ServiceRequest.category_id == category.id,
+            ServiceRequest.status.in_(unresolved),
+        )
+    ):
+        return
+    data = RequestCreate(
+        title="Forgot password",
+        description="Asked for from the sign-in page. Check that it is really this person, "
+        "set a new password under People, and give it to them privately.",
+        category_id=category.id,
+        priority="HIGH",
+    )
+    create_request(db, user, data)
 
 
 def assign(
@@ -174,8 +212,16 @@ def assign(
         raise Invalid("The assignee must be an active user")
     if assignee.id == request.requester_id:
         raise Invalid("A request cannot be assigned to the person who raised it")
-    if request.category.is_confidential and assignee.id == request.requester.manager_id:
-        raise Invalid("A confidential request cannot be assigned to the requester's manager")
+    if assignee.id == request.assignee_id:
+        raise Invalid(f"{assignee.full_name} already has this request")
+    category = request.category
+    if category.is_confidential:
+        if assignee.id == request.requester.manager_id:
+            raise Invalid("A confidential request cannot be assigned to the requester's manager")
+        # Only the team that owns the category handles it, so it never leaves that team.
+        if assignee.department_id != category.owning_department_id:
+            owner = category.owning_department.name
+            raise Invalid(f"A confidential request can only be assigned to someone in {owner}")
 
     previous = request.status
     request.status, request.assignee = S.ASSIGNED, assignee
@@ -184,7 +230,7 @@ def assign(
             request=request, assignee_id=assignee.id, assigned_by_id=user.id, note=note
         )
     )
-    _record(db, request, user, previous, note)
+    _record(db, request, user, previous, note, assignee)
     db.commit()
     return request
 

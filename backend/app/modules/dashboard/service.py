@@ -121,10 +121,10 @@ def count_service_requests(db: Session, group_by=None, **filters) -> dict:
     return result
 
 
-def list_service_requests(db: Session, limit: int = 20, **filters) -> list[dict]:
+def list_service_requests(db: Session, limit: int = 20, **filters) -> dict:
+    matching = _requests(**filters)
     query = (
-        _requests(**filters)
-        .options(
+        matching.options(
             selectinload(ServiceRequest.category),
             selectinload(ServiceRequest.requester).selectinload(User.country),
             selectinload(ServiceRequest.assignee),
@@ -132,7 +132,7 @@ def list_service_requests(db: Session, limit: int = 20, **filters) -> list[dict]
         .order_by(ServiceRequest.created_at.desc())
         .limit(min(limit, 20))
     )
-    return [request_row(request) for request in db.scalars(query)]
+    return {"total": _count(db, matching), "rows": [request_row(r) for r in db.scalars(query)]}
 
 
 def request_row(request: ServiceRequest) -> dict:
@@ -184,6 +184,7 @@ def onboarding_progress(db: Session, country=None, active_only=False) -> list[di
 
 
 TASK_STATES = {
+    "not_completed": OnboardingTask.status != TaskStatus.COMPLETED,
     "overdue": OnboardingTask.is_overdue,
     "blocked": OnboardingTask.is_blocked,
     "in_progress": OnboardingTask.status == TaskStatus.IN_PROGRESS,
@@ -194,7 +195,7 @@ TASK_STATES = {
 
 def list_onboarding_tasks(
     db: Session, state: str, country=None, department=None, limit: int = 20
-) -> list[dict]:
+) -> dict:
     if state not in TASK_STATES:
         raise Invalid(f"state must be one of: {', '.join(TASK_STATES)}")
     query = (
@@ -210,7 +211,7 @@ def list_onboarding_tasks(
     if department:
         query = query.where(func.lower(Department.name) == department.lower())
     tasks = db.scalars(query.order_by(OnboardingTask.due_date).limit(min(limit, 20)))
-    return [
+    rows = [
         {
             "new_hire": task.employee.full_name,
             "country": task.employee.country.name,
@@ -223,6 +224,7 @@ def list_onboarding_tasks(
         }
         for task in tasks
     ]
+    return {"total": _count(db, query), "rows": rows}
 
 
 def onboarding_summary(db: Session) -> dict:

@@ -9,6 +9,7 @@ from app.modules.users.schemas import (
     CountryOut,
     DepartmentOut,
     DepartmentUpdate,
+    PasswordReset,
     UserCreate,
     UserOut,
     UserSummary,
@@ -28,11 +29,13 @@ def list_users(
     department_id: int | None = None,
     role: UserRole | None = None,
     status: EmploymentStatus | None = None,
+    is_active: bool | None = None,
     search: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
     filters = {
+        "is_active": is_active,
         "country": country,
         "department_id": department_id,
         "role": role,
@@ -44,8 +47,10 @@ def list_users(
 
 
 @router.get("/users/lookup", response_model=list[UserSummary], dependencies=[managers_and_admins])
-def lookup_users(db: Db, department_id: int | None = None, search: str | None = None):
-    return service.lookup_users(db, department_id, search)
+def lookup_users(
+    db: Db, department_id: int | None = None, search: str | None = None, managing: bool = False
+):
+    return service.lookup_users(db, department_id, search, managing)
 
 
 @router.get("/users/{user_id}", response_model=UserOut)
@@ -59,11 +64,23 @@ def create_user(data: UserCreate, db: Db):
 
 
 @router.patch("/users/{user_id}", response_model=UserUpdated, dependencies=[require_admin])
-def update_user(user_id: int, data: UserUpdate, db: Db):
-    user = service.update_user(db, user_id, data)
-    # Tells HR Admin how much work a deactivated person still holds.
-    open_items = 0 if user.is_active else service.open_work(db, user.id)
-    return UserUpdated.model_validate(user).model_copy(update={"open_items": open_items})
+def update_user(user_id: int, data: UserUpdate, db: Db, actor: CurrentUser):
+    user = service.update_user(db, actor, user_id, data)
+    # Tells HR Admin what a deactivated person still holds: work, and people who report to them.
+    left = (
+        {}
+        if user.is_active
+        else {
+            "open_items": service.open_work(db, user.id),
+            "direct_reports": service.direct_reports(db, user.id),
+        }
+    )
+    return UserUpdated.model_validate(user).model_copy(update=left)
+
+
+@router.post("/users/{user_id}/password", status_code=204, dependencies=[require_admin])
+def set_password(user_id: int, data: PasswordReset, db: Db, actor: CurrentUser):
+    service.set_password(db, actor, user_id, data.new_password)
 
 
 @router.get("/departments", response_model=list[DepartmentOut])

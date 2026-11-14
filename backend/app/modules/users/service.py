@@ -37,8 +37,10 @@ def list_users(db: Session, viewer: User, filters: dict, page: int, page_size: i
             query = query.where(getattr(User, column) == filters[column])
     if filters.get("country"):
         query = query.where(User.country_code == filters["country"].upper())
-    if filters.get("search"):
-        text = filters["search"]
+    if filters.get("is_active") is not None:
+        query = query.where(User.is_active == filters["is_active"])
+    text = (filters.get("search") or "").strip()
+    if text:
         query = query.where(or_(contains(User.full_name, text), contains(User.email, text)))
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     rows = db.scalars(
@@ -47,12 +49,16 @@ def list_users(db: Session, viewer: User, filters: dict, page: int, page_size: i
     return rows, total
 
 
-def lookup_users(db: Session, department_id: int | None, search: str | None) -> list[User]:
+def lookup_users(
+    db: Session, department_id: int | None, search: str | None, managing: bool = False
+) -> list[User]:
     query = select(User).where(User.is_active)
     if department_id:
         query = query.where(User.department_id == department_id)
-    if search:
-        query = query.where(contains(User.full_name, search))
+    if managing:
+        query = query.where(User.role.in_(MANAGING_ROLES))
+    if search and search.strip():
+        query = query.where(contains(User.full_name, search.strip()))
     return list(db.scalars(query.order_by(User.full_name).limit(50)))
 
 
@@ -79,6 +85,23 @@ def _check_manager(db: Session, user_id: int | None, manager_id: int | None) -> 
         manager = db.get(User, above, populate_existing=True) if above else None
 
 
+def set_password(db: Session, actor: User, user_id: int, password: str) -> None:
+    user = db.get(User, user_id)
+    if not user:
+        raise NotFound("User not found")
+    if user.id == actor.id:
+        # Their own change must prove the current password first.
+        raise Conflict("Change your own password on the Account page", "OWN_PASSWORD")
+    user.password_hash = hash_password(password)
+    # Ends every session the person has, in case the old password was known to someone else.
+    user.token_version += 1
+    db.commit()
+
+
+def direct_reports(db: Session, user_id: int) -> int:
+    return db.scalar(select(func.count()).where(User.manager_id == user_id, User.is_active))
+
+
 def open_work(db: Session, user_id: int) -> int:
     return requests.count_open_assigned(db, user_id) + onboarding.count_open_assigned(db, user_id)
 
@@ -102,7 +125,7 @@ def create_user(db: Session, data: UserCreate) -> User:
     return user
 
 
-def update_user(db: Session, user_id: int, data: UserUpdate) -> User:
+def update_user(db: Session, actor: User, user_id: int, data: UserUpdate) -> User:
     user = db.get(User, user_id)
     if not user:
         raise NotFound("User not found")
@@ -112,8 +135,14 @@ def update_user(db: Session, user_id: int, data: UserUpdate) -> User:
         for field, value in data.model_dump(exclude_unset=True).items()
         if value is not None or field == "manager_id"
     }
+    if user.id == actor.id and changes.get("is_active") is False:
+        raise Conflict("You cannot disable your own sign-in", "OWN_ACCOUNT")
+    if user.id == actor.id and changes.get("role", user.role) != user.role:
+        # Otherwise the last HR Admin could lock everyone out of administration.
+        raise Conflict("You cannot change your own role", "OWN_ROLE")
     _check_references(db, changes.get("country"), changes.get("department_id"))
-    if changes.get("manager_id"):
+    # Checked only when the manager changes, so other edits still save under an old manager.
+    if changes.get("manager_id") and changes["manager_id"] != user.manager_id:
         _check_manager(db, user.id, changes["manager_id"])
         if requests.holds_confidential_request_from(db, changes["manager_id"], user.id):
             raise Conflict(

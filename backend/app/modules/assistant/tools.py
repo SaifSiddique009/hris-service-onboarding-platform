@@ -2,6 +2,8 @@
 plus one of the report functions the dashboard also uses."""
 
 import json
+import re
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -66,7 +68,9 @@ class OnboardingProgress(Args):
 class ListOnboardingTasks(Args):
     """List onboarding tasks in one state, with the new hire, owner, assignee and due date."""
 
-    state: Literal["overdue", "blocked", "in_progress", "not_started", "completed"]
+    state: Literal[
+        "not_completed", "overdue", "blocked", "in_progress", "not_started", "completed"
+    ] = Field(description="not_completed = every task that is not finished, late or not")
     country: str | None = COUNTRY
     department: str | None = Field(None, description="Department that owns the task")
     limit: int = Field(20, ge=1, le=20)
@@ -89,6 +93,18 @@ TOOLS = {
         reports.new_hires_with_open_requests,
     ),
 }
+
+
+# What each tool reads, in words a person would use.
+LABELS = {
+    "count_employees": "employees",
+    "count_service_requests": "service requests",
+    "list_service_requests": "service requests",
+    "onboarding_progress": "new hires",
+    "list_onboarding_tasks": "onboarding tasks",
+    "new_hires_with_open_requests": "new hires",
+}
+MAX_ROWS = 20
 
 
 def _compact(schema):
@@ -116,6 +132,24 @@ SCHEMAS = [
 ]
 
 
+CODE = re.compile(r"[A-Z]+(_[A-Z]+)+|[A-Z]{4,}")
+DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def readable(value):
+    """The result in the words the model should repeat: In progress, 10 Nov 2026."""
+    if isinstance(value, dict):
+        return {key: readable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [readable(item) for item in value]
+    if isinstance(value, str) and CODE.fullmatch(value):
+        return "HR Admin" if value == "HR_ADMIN" else value.replace("_", " ").capitalize()
+    if isinstance(value, str) and DAY.fullmatch(value):
+        day = date.fromisoformat(value)
+        return f"{day.day} {day:%b %Y}"
+    return value
+
+
 class ToolError(Exception):
     pass
 
@@ -130,8 +164,15 @@ def run(db: Session, name: str, raw_arguments: str) -> tuple[dict, object, list[
         result = function(db, **arguments.model_dump(exclude_none=True))
     except (ValueError, ValidationError, Invalid) as error:
         raise ToolError(getattr(error, "message", str(error))) from None
-    if isinstance(result, dict):
+    if isinstance(result, list):
+        result = {"total": len(result), "rows": result[:MAX_ROWS]}
+    if "rows" not in result:
         rows = result.get("groups") or [{"total": result["total"]}]
     else:
-        rows = result
+        rows = result["rows"]
+        if result["total"] > len(rows):
+            # Without this the model reports the cut list as if it were everything.
+            result["note"] = (
+                f"Only the first {len(rows)} of {result['total']} are listed. Say so in the answer."
+            )
     return arguments.model_dump(exclude_none=True, exclude_defaults=True), result, rows

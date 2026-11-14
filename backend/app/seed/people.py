@@ -7,7 +7,7 @@ from app.core.security import hash_password
 from app.modules.requests.models import RequestCategory
 from app.modules.users.models import Country, Department, EmploymentStatus, User, UserRole
 
-EMAIL_DOMAIN = "northbridge.example"
+EMAIL_DOMAIN = "nextventure.example"
 DEMO_PASSWORD = "Welcome@2026"
 
 COUNTRIES = [
@@ -113,6 +113,7 @@ NEW_HIRES = [
 CATEGORIES = [
     ("IT Equipment", "Laptops, monitors, peripherals and repairs.", "IT", False),
     ("Software Access", "Licences, accounts and permissions for tools.", "IT", False),
+    ("Account Access", "Sign-in problems and forgotten passwords.", "People & Culture", True),
     ("HR Query", "Pay, leave, benefits, policies and personal matters.", "People & Culture", True),
     ("Facilities", "Desks, access cards, office repairs and supplies.", "Operations", False),
     ("Other", "Anything that does not fit another category.", None, False),

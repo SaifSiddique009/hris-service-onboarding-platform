@@ -1,6 +1,6 @@
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, selectinload
 
@@ -94,8 +94,10 @@ def _commit_unique(db: Session, message: str) -> None:
 def _check_template_task(db: Session, template: OnboardingTemplate, task: OnboardingTemplateTask):
     if task.owner_kind == TaskOwnerKind.LINE_MANAGER:
         task.owner_department_id = None
-    elif not task.owner_department_id or not db.get(Department, task.owner_department_id):
+    elif not task.owner_department_id:
         raise Invalid("A department task needs an owning department")
+    elif not db.get(Department, task.owner_department_id):
+        raise Invalid("That department does not exist")
 
     # Follow the chain from the dependency; reaching this task again would be a loop.
     by_id = {t.id: t for t in template.tasks}
@@ -125,7 +127,12 @@ def update_template_task(db: Session, template_id: int, task_id: int, data: Temp
     task = next((t for t in template.tasks if t.id == task_id), None)
     if not task:
         raise NotFound("Task not found")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    # Checked before the task is touched, so a bad value is never written.
+    department = changes.get("owner_department_id")
+    if department and not db.get(Department, department):
+        raise Invalid("That department does not exist")
+    for field, value in changes.items():
         # A null only means something for the two fields that can be cleared.
         if value is not None or field in ("depends_on_task_id", "owner_department_id"):
             setattr(task, field, value)
@@ -139,8 +146,15 @@ def delete_template_task(db: Session, template_id: int, task_id: int) -> None:
     task = next((t for t in template.tasks if t.id == task_id), None)
     if not task:
         raise NotFound("Task not found")
-    if any(t.depends_on_task_id == task.id for t in template.tasks):
-        raise Conflict("Another task depends on this one", "HAS_DEPENDENTS")
+    waiting = [f"'{t.title}'" for t in template.tasks if t.depends_on_task_id == task.id]
+    if waiting:
+        many = len(waiting) > 1
+        raise Conflict(
+            f"{' and '.join(waiting)} {'wait' if many else 'waits'} for this task. Delete "
+            f"{'those tasks' if many else 'that task'} first, or change "
+            f"{'them so they no longer wait' if many else 'it so it no longer waits'}.",
+            "HAS_DEPENDENTS",
+        )
     db.delete(task)
     db.commit()
 
@@ -204,6 +218,12 @@ def assign_checklist(
     db.add(checklist)
     copies: dict[int, OnboardingTask] = {}
     warnings = []
+    late = (date.today() - start).days
+    if late > 30:
+        warnings.append(
+            f"The checklist starts on {_day(start)}, {late} days ago, so tasks may already be "
+            "overdue. Assign it again with a later start date if that is not intended."
+        )
     for source in template.tasks:
         owner = (
             employee.manager
@@ -243,7 +263,7 @@ def assign_checklist(
 def my_tasks(db: Session, user: User, state: str | None) -> list[OnboardingTask]:
     query = select(OnboardingTask).where(OnboardingTask.assignee_id == user.id)
     filters = {
-        "open": OnboardingTask.status != T.COMPLETED,
+        "open": and_(OnboardingTask.status != T.COMPLETED, ~OnboardingTask.is_blocked),
         "completed": OnboardingTask.status == T.COMPLETED,
         "blocked": OnboardingTask.is_blocked,
         "overdue": OnboardingTask.is_overdue,
@@ -293,13 +313,16 @@ def transition(db: Session, user: User, task_id: int, action_name: str) -> Onboa
             raise Conflict(f'Blocked until "{dependency.title}" is completed', "TASK_BLOCKED")
     if action_name == "reopen":
         started = db.scalar(
-            select(func.count()).where(
+            select(OnboardingTask).where(
                 OnboardingTask.depends_on_task_id == task.id, OnboardingTask.status != T.NOT_STARTED
             )
         )
         if started:
+            state = "completed" if started.status == T.COMPLETED else "in progress"
             raise Conflict(
-                "A task that depends on this one has already started", "DEPENDENT_STARTED"
+                f'"{started.title}" waits for this task and is already {state}. '
+                "Put that task back to Not started first.",
+                "DEPENDENT_STARTED",
             )
 
     now = datetime.now(UTC)
@@ -319,9 +342,16 @@ def transition(db: Session, user: User, task_id: int, action_name: str) -> Onboa
     return task
 
 
+def _day(value: date) -> str:
+    return f"{value.day} {value:%b %Y}"
+
+
 def update_task(db: Session, admin: User, task_id: int, data: TaskUpdate) -> OnboardingTask:
     task = get_task(db, admin, task_id)
     _lock_checklist(db, task)
+    start = task.checklist.start_date
+    if data.due_date and data.due_date < start:
+        raise Invalid(f"The due date cannot be before the checklist start date, {_day(start)}")
     if data.assignee_id is not None and data.assignee_id != task.assignee_id:
         assignee = db.get(User, data.assignee_id)
         if not assignee or not assignee.is_active:
@@ -330,7 +360,7 @@ def update_task(db: Session, admin: User, task_id: int, data: TaskUpdate) -> Onb
         task.assignee = assignee
         _record(db, task, admin, task.status, note)
     if data.due_date is not None and data.due_date != task.due_date:
-        note = f"Due date changed from {task.due_date} to {data.due_date}"
+        note = f"Due date changed from {_day(task.due_date)} to {_day(data.due_date)}"
         task.due_date = data.due_date
         _record(db, task, admin, task.status, note)
     db.commit()

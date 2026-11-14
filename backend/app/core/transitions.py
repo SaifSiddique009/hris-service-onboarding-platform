@@ -2,7 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from app.core.errors import Conflict, Forbidden
+from app.core.errors import Conflict, Forbidden, Invalid
 
 
 @dataclass(frozen=True)
@@ -15,11 +15,11 @@ class Action:
 def check_action(actions: dict[str, Action], name: str, row, user) -> Action:
     """409 if the action does not start from the row's status, 403 if this user may not take it."""
     action = actions.get(name)
-    if not action or row.status not in action.sources:
-        raise Conflict(
-            f"'{name}' is not possible while the status is {row.status.value}",
-            "INVALID_TRANSITION",
-        )
+    if not action:
+        raise Invalid("Action is not valid")
+    if row.status not in action.sources:
+        status = row.status.value.replace("_", " ").capitalize()
+        raise Conflict(f"This cannot be done now: the status is {status}", "INVALID_TRANSITION")
     if not action.allowed(user, row):
         raise Forbidden("You are not allowed to do this")
     return action

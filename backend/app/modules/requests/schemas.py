@@ -23,6 +23,7 @@ class StatusEventOut(Out):
     from_status: RequestStatus | None
     to_status: RequestStatus
     actor: UserSummary
+    assignee: UserSummary | None
     note: str | None
     created_at: datetime
 

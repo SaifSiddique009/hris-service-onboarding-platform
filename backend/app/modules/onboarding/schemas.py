@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
-from app.core.schemas import In, Out
+from app.core.schemas import In, Out, PlausibleDate
 from app.modules.onboarding.models import DeadlineUnit, TaskOwnerKind, TaskStatus
 from app.modules.users.schemas import DepartmentRef, UserSummary
 
@@ -135,7 +135,7 @@ class ChecklistCreated(ChecklistDetail):
 class ChecklistCreate(In):
     employee_id: int
     template_id: int
-    start_date: date | None = None
+    start_date: PlausibleDate | None = None
 
 
 class TaskTransitionIn(In):
@@ -144,4 +144,4 @@ class TaskTransitionIn(In):
 
 class TaskUpdate(In):
     assignee_id: int | None = None
-    due_date: date | None = None
+    due_date: PlausibleDate | None = None

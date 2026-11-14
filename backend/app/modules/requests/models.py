@@ -114,11 +114,14 @@ class RequestStatusEvent(Base):
     from_status: Mapped[RequestStatus | None] = mapped_column(status_enum)
     to_status: Mapped[RequestStatus] = mapped_column(status_enum)
     actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # Set on an assign or reassign: who received the request.
+    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     request: Mapped[ServiceRequest] = relationship(back_populates="history")
-    actor: Mapped[User] = relationship()
+    actor: Mapped[User] = relationship(foreign_keys=[actor_id])
+    assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id])
 
 
 class RequestComment(Base):
