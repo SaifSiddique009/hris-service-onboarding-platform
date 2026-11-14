@@ -132,7 +132,7 @@ def test_second_bad_call_ends_with_a_clear_message(ask, model):
     script, _ = model
     script += [tool_call("delete_everything"), tool_call("count_employees", colour="blue")]
     body = ask("Delete all employees").json()
-    assert body["answer"].startswith("I could not work that out")
+    assert body["answer"].startswith("I can only answer questions about")
     assert body["tools_used"] == []
 
 
@@ -224,3 +224,24 @@ def test_tool_calls_in_one_round_are_capped(ask, model):
     many["tool_calls"] = [dict(many["tool_calls"][0], id=f"call_{n}") for n in range(10)]
     script += [many, says("100 employees.")]
     assert len(ask("Count many times").json()["tools_used"]) == 4
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Why did the HR manager cross the road? To onboard the chicken.",
+        "def reverse(s): return s[::-1]",
+        "Paris.",
+    ],
+)
+def test_reply_that_used_no_data_becomes_the_fixed_scope_message(reply, ask, model):
+    # Whatever the model says without calling a tool cannot have come from the platform.
+    script, _ = model
+    script += [says(reply)]
+    body = ask("Tell me a joke, write some code, name a capital").json()
+    assert body["answer"].startswith("I can only answer questions about")
+    assert reply not in body["answer"]
+
+
+def test_question_of_only_spaces_is_rejected(ask, model):
+    assert ask("     ").status_code == 422

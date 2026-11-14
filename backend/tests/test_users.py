@@ -1,3 +1,4 @@
+import pytest
 from conftest import auth
 
 API = "/api/v1"
@@ -221,3 +222,34 @@ def test_nobody_can_be_their_own_manager(client, world):
         headers=auth(world.admin),
     )
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "password",
+    ["", "        ", "1", "12345678", "password", " Welcome@2026", "Welcome@2026 ", "x" * 80],
+)
+def test_weak_or_malformed_passwords_are_rejected(password, client, world):
+    body = new_user(world, password=password)
+    assert client.post(f"{API}/users", json=body, headers=auth(world.admin)).status_code == 422
+
+
+def test_accepted_password_can_sign_in(client, world):
+    body = new_user(world, password="Rainy day 42")
+    assert client.post(f"{API}/users", json=body, headers=auth(world.admin)).status_code == 201
+    login = client.post(
+        "/api/v1/auth/login", json={"email": body["email"], "password": "Rainy day 42"}
+    )
+    assert login.status_code == 200
+
+
+@pytest.mark.parametrize("field", ["full_name", "job_title"])
+def test_text_of_only_spaces_is_rejected(field, client, world):
+    body = new_user(world, **{field: "     "})
+    assert client.post(f"{API}/users", json=body, headers=auth(world.admin)).status_code == 422
+
+
+def test_search_treats_percent_and_underscore_as_plain_text(client, world):
+    headers = auth(world.admin)
+    assert client.get(f"{API}/users?search=%25", headers=headers).json()["total"] == 0
+    assert client.get(f"{API}/users?search=_", headers=headers).json()["total"] == 0
+    assert client.get(f"{API}/users?search=employ", headers=headers).json()["total"] == 1

@@ -387,3 +387,20 @@ def test_history_cannot_be_deleted_with_its_request(db, submit, world):
     # raises() is outermost so the savepoint is rolled back, not released, after the error.
     with pytest.raises(IntegrityError), db.begin_nested():
         db.execute(delete(ServiceRequest).where(ServiceRequest.id == request["id"]))
+
+
+@pytest.mark.parametrize("field", ["title", "description"])
+def test_request_text_of_only_spaces_is_rejected(field, client, world, categories):
+    body = {
+        "title": "Laptop screen is cracked",
+        "description": "It fell off my desk.",
+        "category_id": categories["it"].id,
+        "priority": "HIGH",
+    } | {field: "       "}
+    assert (
+        client.post(f"{API}/requests", json=body, headers=auth(world.employee)).status_code == 422
+    )
+
+
+def test_request_title_is_stored_without_surrounding_spaces(submit, world):
+    assert submit(world.employee, title="   Monitor arm   ")["title"] == "Monitor arm"
