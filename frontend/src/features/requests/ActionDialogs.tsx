@@ -1,10 +1,9 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import type { RequestAction, RequestDetail, UserSummary } from '../../api/types'
-import { Button } from '../../components/Button'
 import { Field, Input, Select, Textarea } from '../../components/Fields'
-import { Modal } from '../../components/Modal'
+import { FormDialog as Form } from '../../components/FormDialog'
 import { label } from '../../lib/format'
 import { useCategories, useDepartments } from './queries'
 
@@ -17,42 +16,6 @@ interface Props {
   onClose: () => void
   onDone: (updated: RequestDetail) => void
   onError: (err: Error) => void
-}
-
-function Form({
-  title,
-  onClose,
-  onSubmit,
-  pending,
-  disabled,
-  children,
-}: {
-  title: string
-  onClose: () => void
-  onSubmit: () => void
-  pending: boolean
-  disabled?: boolean
-  children: ReactNode
-}) {
-  function submit(e: FormEvent) {
-    e.preventDefault()
-    onSubmit()
-  }
-  return (
-    <Modal title={title} onClose={onClose}>
-      <form onSubmit={submit} className="space-y-4">
-        {children}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" loading={pending} disabled={disabled}>
-            Confirm
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  )
 }
 
 const noteRequired: RequestAction[] = ['reject', 'resolve', 'reopen']

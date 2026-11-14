@@ -108,3 +108,110 @@ export interface RequestCreate {
   category_id: number
   priority: RequestPriority
 }
+
+export type TaskStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED'
+export type TaskAction = 'start' | 'complete' | 'put_back' | 'reopen'
+export type TaskOwnerKind = 'DEPARTMENT' | 'LINE_MANAGER'
+export type DeadlineUnit = 'DAY' | 'WEEK'
+
+export interface Progress {
+  total: number
+  completed: number
+  in_progress: number
+  not_started: number
+  blocked: number
+  overdue: number
+}
+
+export interface TaskEvent {
+  from_status: TaskStatus | null
+  to_status: TaskStatus
+  actor: UserSummary
+  note: string | null
+  created_at: string
+}
+
+export interface OnboardingTask {
+  id: number
+  checklist_id: number
+  employee: UserSummary
+  title: string
+  description: string
+  owner_kind: TaskOwnerKind
+  owner_department: Department | null
+  assignee: UserSummary
+  due_date: string
+  status: TaskStatus
+  effective_status: TaskStatus | 'BLOCKED'
+  is_overdue: boolean
+  depends_on: { id: number; title: string; status: TaskStatus } | null
+  completed_at: string | null
+  allowed_actions: TaskAction[]
+}
+
+export interface OnboardingTaskDetail extends OnboardingTask {
+  history: TaskEvent[]
+}
+
+export interface ChecklistSummary {
+  id: number
+  employee: UserSummary
+  template: { id: number; name: string }
+  start_date: string
+  progress: Progress
+}
+
+export interface ChecklistDetail extends ChecklistSummary {
+  tasks: OnboardingTaskDetail[]
+}
+
+export interface ChecklistCreated extends ChecklistDetail {
+  warnings: string[]
+}
+
+export interface ChecklistCreate {
+  employee_id: number
+  template_id: number
+  start_date: string | null
+}
+
+export interface TaskUpdate {
+  assignee_id?: number
+  due_date?: string
+}
+
+export interface TemplateTask {
+  id: number
+  title: string
+  description: string
+  owner_kind: TaskOwnerKind
+  owner_department: Department | null
+  deadline_unit: DeadlineUnit
+  deadline_value: number
+  deadline_label: string
+  depends_on_task_id: number | null
+  sort_order: number
+}
+
+export interface Template {
+  id: number
+  name: string
+  description: string
+  is_active: boolean
+  task_count: number
+  updated_at: string
+}
+
+export interface TemplateDetail extends Template {
+  tasks: TemplateTask[]
+}
+
+export interface TemplateTaskInput {
+  title: string
+  description: string
+  owner_kind: TaskOwnerKind
+  owner_department_id: number | null
+  deadline_unit: DeadlineUnit
+  deadline_value: number
+  depends_on_task_id: number | null
+}
