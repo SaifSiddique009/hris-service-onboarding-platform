@@ -14,6 +14,7 @@ Contents:
 6. [Trade-off notes](#6-trade-off-notes)
 7. [Invariants](#7-invariants)
 8. [Assumptions and scope](#8-assumptions-and-scope)
+9. [Testing approach](#9-testing-approach)
 
 ---
 
@@ -264,9 +265,11 @@ Indexes: `manager_id`, `country_code`, `department_id`.
 
 Rules checked when a user is created or changed:
 
-- `manager_id` must point to an active user whose role is `MANAGER` or `HR_ADMIN`.
+- `manager_id` must point to an active user whose role is `MANAGER` or `HR_ADMIN`, and the reporting line above that manager must not lead back to the user.
 - A user who still has direct reports cannot be moved to the `EMPLOYEE` role.
-- A user cannot be deactivated while they are the assignee of an unresolved request or an incomplete onboarding task. The work has to be reassigned first.
+- A department head must be an active member of that department with the role `MANAGER` or `HR_ADMIN`.
+
+**Deactivation always succeeds, at once.** The account can no longer log in and every token already issued stops working. It is never blocked by unfinished work, because cutting someone's access must not wait on housekeeping. Open requests and onboarding tasks stay with the deactivated person; the response reports how many there are, and the dashboard shows the total held by inactive users until HR Admin reassigns them.
 
 #### Module A: Service Requests
 
@@ -392,7 +395,7 @@ Unique `(id, template_id)`, and a composite foreign key `(depends_on_task_id, te
 Unique `(id, checklist_id)`, and a composite foreign key `(depends_on_task_id, checklist_id)` referencing it, so a task can only depend on a task in the same checklist.
 Indexes: `(assignee_id, status)`, `checklist_id`, `due_date`.
 
-**`onboarding_task_events`** (one row per status change; the audit trail)
+**`onboarding_task_events`** (one row per status change, reassignment or due-date change; the audit trail)
 
 | Column | Type | Constraints |
 |---|---|---|
@@ -400,9 +403,10 @@ Indexes: `(assignee_id, status)`, `checklist_id`, `due_date`.
 | from_status | `task_status` | nullable (null for the creation event) |
 | to_status | `task_status` | not null |
 | actor_id | bigint | not null, FK `users` |
+| note | text | nullable; set for a reassignment or due-date change, with the old and new value |
 | created_at | timestamptz | not null |
 
-`completed_at` and `completed_by_id` on the task describe only the latest completion. If a task is completed, reopened and completed again, all three moves stay in this table.
+`completed_at` and `completed_by_id` on the task describe only the latest completion. If a task is completed, reopened and completed again, all three moves stay in this table. A reassignment or a changed due date is recorded as a row whose status does not change and whose note says what did, so the table also answers "who moved this deadline, and who owned the task before?".
 
 #### AI
 
@@ -432,7 +436,7 @@ When HR Admin assigns a template to a new hire, one transaction:
 4. Resolves the named assignee:
    - `LINE_MANAGER` tasks go to the new hire's manager.
    - `DEPARTMENT` tasks go to the head of that department.
-   - If that person is missing or inactive, the task goes to the HR Admin who is assigning the checklist, so a task is never left without an owner.
+   - If that person is missing or inactive, the task goes to the HR Admin who is assigning the checklist, so a task is never left without an owner. This is not silent: the response lists every task that fell back, so the admin knows which ones to hand to the right person.
    - HR Admin can reassign any task afterwards.
 5. Rewrites each dependency to point at the copied task in the same checklist.
 6. Writes the creation event for every task.
@@ -460,7 +464,7 @@ Example for a start date of Monday 2 November: "Day 1" is 2 November, "Day 2" is
 - *Blocked*: the task is not started, it has a dependency, and that dependency is not completed.
 - *Overdue*: the task is not completed and its due date is before today's date in the new hire's country.
 
-Storing either would need a background job to keep it true, and it would be wrong between runs. The API computes both on read and returns an `effective_status` (which can be `BLOCKED`) and an `is_overdue` flag alongside the stored status.
+The API computes both on read and returns an `effective_status` (which can be `BLOCKED`) and an `is_overdue` flag alongside the stored status. Section 6.3 gives the reasoning.
 
 **How the two modules share data without duplication.** Both modules hold only foreign keys into `users`, `departments` and `countries`. A new hire with an open laptop request is the same `users` row on both sides, which is what makes cross-module questions a plain join.
 
@@ -516,7 +520,7 @@ OnboardingTask  { id, checklist_id, employee: UserSummary, title, description, o
                   is_overdue, depends_on: {id, title, status} | null, completed_at,
                   allowed_actions: string[] }
 OnboardingTaskDetail  OnboardingTask + { history: TaskEvent[] }
-TaskEvent       { from_status, to_status, actor: UserSummary, created_at }
+TaskEvent       { from_status, to_status, actor: UserSummary, note, created_at }
 ```
 
 `reference` is a display form of the id, for example `REQ-0042`. `allowed_actions` lists the actions the current caller may take on that row right now, so the UI renders only legal buttons while the server stays the authority.
@@ -538,7 +542,7 @@ TaskEvent       { from_status, to_status, actor: UserSummary, created_at }
 | GET | `/users/lookup` | query: `department_id, search` | `UserSummary[]` | Manager, HR Admin (assignee pickers) |
 | GET | `/users/{id}` | | `User` | HR Admin, the user's manager, or the user |
 | POST | `/users` | `{ full_name, email, password, job_title, role, country, department_id, manager_id, status, joining_date }` | `201 User` | HR Admin |
-| PATCH | `/users/{id}` | any subset of the fields above, plus `is_active` | `User` | HR Admin |
+| PATCH | `/users/{id}` | any subset of the fields above, plus `is_active` | `User + { open_items }`, the number of open requests and tasks a deactivated user still holds | HR Admin |
 | GET | `/departments` | | `Department[]` | Any |
 | PATCH | `/departments/{id}` | `{ head_id }` | `Department` | HR Admin |
 | GET | `/countries` | | `Country[]` | Any |
@@ -551,7 +555,8 @@ TaskEvent       { from_status, to_status, actor: UserSummary, created_at }
 | POST | `/requests` | `{ title, description, category_id, priority }` | `201 RequestDetail` | Any |
 | GET | `/requests` | query: `view` (`mine`, `assigned`, `team`, `queue`, `all`), `status, category_id, priority, country, search, page, page_size` | `Page<RequestSummary>` | Scoped |
 | GET | `/requests/{id}` | | `RequestDetail` | Scoped |
-| POST | `/requests/{id}/assign` | `{ assignee_id, note? }` | `RequestDetail` | A triager of the request (section 4.1) |
+| POST | `/requests/{id}/assign` | `{ assignee_id, note? }` | `RequestDetail`; `409 ALREADY_ASSIGNED` if the request is no longer Submitted | A triager of the request (section 4.1) |
+| POST | `/requests/{id}/reassign` | `{ assignee_id, note? }` | `RequestDetail` | A triager of the request |
 | POST | `/requests/{id}/transitions` | `{ action, note? }` where `action` is `start`, `resolve`, `reopen`, `close`, `withdraw` or `reject` | `RequestDetail` | Per action (section 5.1) |
 | POST | `/requests/{id}/comments` | `{ body }` | `201 Comment` | Anyone who can see the request, until it is Closed |
 
@@ -568,13 +573,13 @@ TaskEvent       { from_status, to_status, actor: UserSummary, created_at }
 | POST | `/onboarding/templates/{id}/tasks` | `{ title, description, owner_kind, owner_department_id?, deadline_unit, deadline_value, depends_on_task_id?, sort_order? }` | `201 TemplateTask` | HR Admin |
 | PATCH | `/onboarding/templates/{id}/tasks/{task_id}` | any subset of the fields above | `TemplateTask` | HR Admin |
 | DELETE | `/onboarding/templates/{id}/tasks/{task_id}` | | `204`; `409` if another task depends on it | HR Admin |
-| POST | `/onboarding/checklists` | `{ employee_id, template_id, start_date? }` | `201 ChecklistDetail` | HR Admin |
+| POST | `/onboarding/checklists` | `{ employee_id, template_id, start_date? }` | `201 ChecklistDetail + { warnings: string[] }`, one warning per task that fell back to the assigning admin | HR Admin |
 | GET | `/onboarding/checklists` | query: `state` (`active`, `completed`), `country` | `ChecklistSummary[]` | Scoped: HR Admin all, Manager direct reports, Employee own |
 | GET | `/onboarding/checklists/me` | | `ChecklistDetail`; `404` if none | Any |
 | GET | `/onboarding/checklists/{id}` | | `ChecklistDetail` | Scoped |
 | GET | `/onboarding/tasks/mine` | query: `state` (`open`, `blocked`, `overdue`, `completed`) | `OnboardingTask[]` | Any; returns tasks where the caller is the assignee, across all new hires |
 | POST | `/onboarding/tasks/{id}/transitions` | `{ action }` where `action` is `start`, `complete`, `put_back` or `reopen` | `OnboardingTask`; `409 TASK_BLOCKED` if the dependency is not completed | Task assignee, HR Admin |
-| PATCH | `/onboarding/tasks/{id}` | `{ assignee_id?, due_date? }` | `OnboardingTask` | HR Admin |
+| PATCH | `/onboarding/tasks/{id}` | `{ assignee_id?, due_date? }` | `OnboardingTask`; each change writes a history row | HR Admin |
 
 Saving a template task checks that the chain of dependencies does not loop back to itself.
 
@@ -585,7 +590,7 @@ Saving a template task checks that the chain of dependencies does not loop back 
 | GET | `/dashboard/headcount` | `{ total, by_country: [{country, count}], by_department: [...], by_status: [...] }` | HR Admin |
 | GET | `/dashboard/requests` | `{ open_total, unresolved_total, awaiting_confirmation_total, by_status: [...], by_category: [...], by_priority: [...] }` | HR Admin |
 | GET | `/dashboard/onboarding` | `{ active_new_hires, completed_new_hires, overdue_tasks, blocked_tasks }` | HR Admin |
-| GET | `/dashboard/insights` | `{ new_hires_with_open_requests: [{ employee: UserSummary, open_requests: RequestSummary[] }], onboarding_completion_by_country: [{ country, total_tasks, completed_tasks, rate }] }` | HR Admin |
+| GET | `/dashboard/insights` | `{ new_hires_with_open_requests: [{ employee: UserSummary, open_requests: RequestSummary[] }], onboarding_completion_by_country: [{ country, total_tasks, completed_tasks, rate }], work_held_by_inactive_users: { requests, onboarding_tasks } }` | HR Admin |
 
 Terms used by the dashboard and by the AI tools, defined once in code:
 
@@ -672,7 +677,8 @@ Two terms used below:
 | Submit a service request | Yes | Yes | Yes |
 | See service requests | Own, and those assigned to them | Own, assigned to them, direct reports', and those in categories their department owns | All, with filters |
 | See requests in a confidential category | Own, and those assigned to them | Own, and those assigned to them | All |
-| Assign, reassign or reject a request | No | As a triager | Any |
+| Assign or reassign a request | No | As a triager | Any |
+| Reject a request | Only as its assignee | As a triager, or as its assignee | Any |
 | Withdraw a submitted request | Own requests | Own requests | Own requests |
 | Start work, resolve | Only as the assignee | Only as the assignee | Only as the assignee |
 | Close a resolved request | Own requests | Own requests | Any |
@@ -692,7 +698,9 @@ Two kinds of rule appear in this table, and the design treats them separately:
 - **Role rules** depend only on who the caller is ("only HR Admin manages templates").
 - **Relationship rules** depend on the caller's link to a specific row ("only the assignee can start work"). An assignee or a task owner is not a role. It is any user who happens to be linked to that row.
 
-**Confidential categories.** HR Query is marked confidential. A question about pay, health or a complaint, possibly about the requester's own manager, must not land in that manager's list. Requests in a confidential category skip the manager entirely: only the requester, the person HR assigns, and HR Admin can see them, and only HR Admin can triage them.
+**Confidential categories.** HR Query is marked confidential. A question about pay, health or a complaint, possibly about the requester's own manager, must not land in that manager's list. Requests in a confidential category skip the manager entirely: only the requester, the person HR assigns, and HR Admin can see them, and only HR Admin can triage them. Because an assignee can read the request, a confidential request cannot be assigned to the requester's manager either.
+
+This protects against the line manager, not against HR itself. Every HR Admin can read every request, so a complaint about an HR Admin, or about a manager who also holds the HR Admin role, needs a channel outside this platform. Closing that gap would take a per-case access list with named reviewers.
 
 ### 4.2 Enforcement
 
@@ -742,6 +750,12 @@ Both workflows are declared as data: a table of actions, each with the status it
 4. Apply the change and its side effects.
 5. Write the history row.
 
+The same lock is taken by every operation whose rule depends on a status or on sibling rows, not only by the actions below:
+
+- Adding a comment locks the request before checking that it is not Closed, so a comment cannot land on a request that closes at the same moment.
+- Adding or editing a template task locks the template before the loop check, so two admins cannot each save one half of a circular dependency.
+- Copying a template into a checklist locks the template, so the copy is of one consistent version.
+
 ### 5.1 Service request lifecycle
 
 ```mermaid
@@ -749,9 +763,10 @@ stateDiagram-v2
     [*] --> SUBMITTED: submit (any user)
     SUBMITTED --> ASSIGNED: assign (triager)
     SUBMITTED --> CLOSED: withdraw (requester), reject (triager)
-    ASSIGNED --> ASSIGNED: assign again (triager)
+    ASSIGNED --> ASSIGNED: reassign (triager)
+    ASSIGNED --> CLOSED: reject (triager, assignee)
     ASSIGNED --> IN_PROGRESS: start (assignee)
-    IN_PROGRESS --> ASSIGNED: assign again (triager)
+    IN_PROGRESS --> ASSIGNED: reassign (triager)
     IN_PROGRESS --> RESOLVED: resolve (assignee)
     RESOLVED --> IN_PROGRESS: reopen (requester)
     RESOLVED --> CLOSED: close (requester, HR Admin)
@@ -761,9 +776,10 @@ stateDiagram-v2
 | Action | From | To | Who | Conditions and side effects |
 |---|---|---|---|---|
 | submit | (none) | Submitted | Any user | Creates the request and the first status event. |
-| assign | Submitted, Assigned, In Progress | Assigned | Triager | `assignee_id` required; the assignee must be an active user other than the requester. Writes an assignment row. From Assigned or In Progress this is a reassignment and work restarts with the new assignee. |
+| assign | Submitted | Assigned | Triager | `assignee_id` required. The assignee must be an active user other than the requester, and for a confidential category must not be the requester's manager. Writes an assignment row. |
+| reassign | Assigned, In Progress | Assigned | Triager | Same assignee rules. Writes a new assignment row; work restarts with the new assignee. |
 | withdraw | Submitted | Closed | Requester | Closure reason `WITHDRAWN`. Sets `closed_at`. |
-| reject | Submitted | Closed | Triager | A note saying why is required. Closure reason `REJECTED`. Sets `closed_at`. |
+| reject | Submitted, Assigned | Closed | Triager; from Assigned also the current assignee | A note saying why is required. Closure reason `REJECTED`. Sets `closed_at`. |
 | start | Assigned | In Progress | Current assignee | |
 | resolve | In Progress | Resolved | Current assignee | A resolution note is required. Sets `resolved_at`. |
 | reopen | Resolved | In Progress | Requester | A note saying what is still wrong is required. Clears `resolved_at`. |
@@ -774,7 +790,8 @@ Closed is final and comments are locked. The brief's five statuses are unchanged
 Notes on the rules:
 
 - Assigning is the approval. A triager who assigns a request has accepted it as valid work; one who does not accept it uses reject, with a reason the requester can read.
-- Withdraw and reject are only possible before work is assigned. Once someone is working on a request, it ends through Resolved, so the person who did the work records the outcome.
+- Assign and reassign are separate actions on purpose. Two triagers can be looking at the same Submitted request. The first assign succeeds; the second fails with `409 ALREADY_ASSIGNED` and the page shows who took it. Replacing someone's choice then takes a deliberate reassign, not an accident of timing.
+- Withdraw is possible only while the request is Submitted. Reject is possible until work starts, so an assignee who is handed a duplicate or invalid request can send it back with a reason, and it is not recorded as completed work. Once a request is In Progress it ends through Resolved, so the person who did the work records the outcome.
 - Only the requester can reopen, because only the requester knows whether the problem is actually gone. HR Admin can close, so that resolved requests do not stay open forever when a requester does not respond.
 - Any action taken from a status it is not listed for, such as resolve on a Submitted request, is rejected with 409.
 
@@ -838,9 +855,9 @@ A checklist has no stored status either. It is active while any of its tasks is 
 - A two-step flow: manager approves, then the department lead assigns. Models approval and fulfilment separately, at the price of a sixth status and a second wait for every request.
 - Both the requester's manager and a manager of the owning department may triage.
 
-**Chosen:** the third. The requester's manager keeps the role the brief describes. A Manager in the department that owns the category also sees that queue and can assign from it, so IT sees IT's work. Whoever acts first assigns; the audit trail records who.
+**Chosen:** the third. The requester's manager keeps the role the brief describes. A Manager in the department that owns the category also sees that queue and can assign from it, so IT sees IT's work. Whoever acts first assigns, and a second assign is refused, so one triager cannot silently replace the other's choice. The audit trail records who acted.
 
-**Cost:** two groups can act on the same Submitted request, so ownership of triage is shared, not single. For a company this size that is faster than a hand-off. With a larger service team, the two-step flow with an explicit approval state and per-category queues would be the better model.
+**Cost:** two groups can act on the same Submitted request, so ownership of triage is shared, not single. Department queues are also company-wide: an IT manager sees IT requests from all four countries, which fits one central team per function but would be too broad if each office ran its own. For a company this size that is faster than a hand-off. With a larger service team, the two-step flow with an explicit approval state and per-category queues would be the better model.
 
 ### 6.2 Confidential requests: privacy over the manager's full view
 
@@ -851,6 +868,8 @@ A checklist has no stored status either. It is active while any of its tasks is 
 **Chosen:** a flag on the category. HR Query is confidential, and such requests bypass the manager and go to HR Admin for triage. The requester does not have to know to ask for privacy, and a manager cannot tell from a missing row that something was filed.
 
 **Cost:** a manager's team view is knowingly incomplete, and the scope rule has one more condition to test. A per-request flag could be added on top for sensitive cases in other categories.
+
+**Limit:** a category flag classifies requests; it is not a full case-access model. It keeps the line manager out, including through assignment, but every HR Admin still sees every request (section 4.1).
 
 ### 6.3 Derived Blocked and Overdue over stored statuses
 
@@ -875,8 +894,8 @@ A checklist has no stored status either. It is active while any of its tasks is 
 **What this does not solve:**
 
 - *The model can still misstate a correct result.* The UI therefore shows the returned rows beside the answer.
-- *Text written by employees reaches the model.* Request titles come back in tool results, and a title could contain instructions aimed at the model. The tools are read-only, the output goes only to the HR Admin who asked, and the rows are shown as they are, so the worst outcome is a misleading sentence next to the correct data.
-- *Employee data leaves the platform.* Tool results are sent to an external LLM provider. The design limits this to the fields listed in section 3.8 and withholds confidential titles. Cyprus is in the EU, so a real deployment would also need a data processing agreement with the provider and a decision on processing region, or a model hosted inside the company's own environment. The provider sits behind one small client module, so it can be replaced without touching the tools.
+- *Text written by employees reaches the model.* Request titles come back in tool results, and a title could contain instructions aimed at the model. Such a title could produce a misleading sentence, or try to steer the model into calling more tools. What bounds this is enforced on the server, not left to the model: every call is read-only, returns only the listed fields, is capped at 20 rows, and a question gets at most three tool rounds. The most a manipulated question can pull is the same minimal data the admin's own question could, and the rows are shown as they are beside the answer.
+- *Employee data leaves the platform.* Tool results are sent to an external LLM provider. The design limits this to the fields listed in section 3.8 and withholds confidential titles. Cyprus is in the EU, so a real deployment would also need a data processing agreement with the provider and a decision on processing region, or a model hosted inside the company's own environment. The provider sits behind one small client module, so it can be replaced without touching the tools. If the provider stays external, the next step is to send placeholders in place of names and restore the names in the answer on the server.
 
 **Cost:** the assistant can only answer questions the catalogue covers, and says so when a question falls outside it.
 
@@ -922,6 +941,8 @@ A checklist has no stored status either. It is active while any of its tasks is 
 
 **Cost:** a token held in browser storage is exposed to script injection. Serving the frontend and API from one origin would allow an HTTP-only cookie, which is the stronger design for a production deployment.
 
+**Why not a same-origin proxy here:** routing API calls through the frontend host would make them same-origin, but the API runs on an instance that sleeps when idle. A proxy with a time limit would turn a slow first request into an error, where a direct call simply waits for the instance to wake.
+
 ### 6.9 Synchronous database access over async
 
 **Considered:** async endpoints with an async driver, against plain synchronous endpoints.
@@ -946,13 +967,15 @@ Rules that must hold at all times, and what guarantees each one.
 | Every status change has a history row | Written in the same transaction by the helper |
 | A task is never started or completed while its dependency is incomplete, and a completed task is never reopened under a started dependent | Dependency checks made while holding the checklist lock |
 | A task depends only on a task in the same checklist; a template task only on one in the same template | Composite foreign keys |
-| Dependencies never form a loop | Validation when a template task is saved; checklists copy an already valid chain |
+| Dependencies never form a loop | Validation when a template task is saved, made while holding the template lock; checklists copy an already valid chain |
 | A `DEPARTMENT` task names its department; a `LINE_MANAGER` task does not | Check constraint |
 | Every onboarding task has a named owner | `assignee_id` not null, with the fallback in section 2.3 |
 | An employee has at most one onboarding checklist | Unique constraint |
-| Nobody is their own manager, and a manager holds a managing role | Check constraint; validation on user changes |
+| Nobody is their own manager, the reporting line never loops, and a manager holds a managing role | Check constraint; validation that walks up the reporting line on user changes |
+| Deactivating a user always succeeds and ends their sessions | No precondition on the action; `token_version` is raised in the same transaction |
+| A closed request receives no comments | The check is made while holding the request lock |
 | A user never receives a row outside their scope | One scope function per resource; tests per role on every list and detail endpoint |
-| A confidential request is never shown to the requester's manager, and its title is never sent to the LLM | Scope function; the AI tools' row builder |
+| A confidential request is never shown to the requester's manager, cannot be assigned to them, and its title is never sent to the LLM | Scope function; the assign rule; the AI tools' row builder |
 | History is never lost | No delete endpoints for workflow records; foreign keys restrict deletion |
 
 ---
@@ -964,12 +987,32 @@ Rules that must hold at all times, and what guarantees each one.
 - Onboarding happens once per employee. Supporting a rehire or a second onboarding after a transfer would mean lifting the unique constraint on `onboarding_checklists.employee_id`.
 - A request's country, for filtering and reporting, is the requester's current country. If the business needed reports by where a request was raised, a country column captured at submission would be added.
 - A manager's scope is their direct reports only, not the whole reporting chain below them.
+- Each function is one company-wide team. A department has one head and one request queue across all four countries, not one per office.
+- When a manager or department head changes, work already assigned stays with the person it was assigned to until HR Admin reassigns it.
 - Accounts are created by HR Admin. The platform is the system of record for login.
 
 **Not included**
 
 - Notifications. Nothing emails or alerts a person when work is assigned to them, a request is reopened or a task becomes overdue; people see it when they open the platform. An outbox table written in the same transaction as the state change, with a small worker sending email, is the natural way to add it.
 - Single sign-on, multi-factor authentication, self-service password reset and login rate limiting. A company already using Google Workspace or Microsoft 365 would sign in through that provider instead of platform passwords.
+- An audit trail for edits to user records. Changes to a person's role, manager, department or country take effect at once but are not recorded as history, although they drive every scope rule.
 - File attachments on requests and tasks.
 - Retention rules for request history and AI query logs.
 - Working-day calendars and public holidays (section 6.3).
+
+---
+
+## 9. Testing approach
+
+Tests run against PostgreSQL, not an in-memory substitute, because the rules rely on enum types, check constraints, row locks and time zones. Each test runs inside a transaction that is rolled back.
+
+| What | How it is tested |
+|---|---|
+| Access scopes | Every list and detail endpoint is called as each role, asserting both what is returned and what is not. A row outside the scope must look exactly like a row that does not exist. |
+| State machines | Each action is tried from every status, by a permitted and a non-permitted actor, asserting success, 409 or 403. |
+| Invariants | Each row of section 7 has at least one test that tries to break it. |
+| Concurrency | The checklist lock is tested with two real database connections acting at the same moment: reopening a task while its dependent is being started. |
+| Dates | Due-date arithmetic and the overdue rule are tested with fixed dates in more than one time zone. |
+| Seed data | The seed script runs in a test that asserts the required counts and state mix. |
+
+The API runs on an instance that sleeps when idle, so the first request after a quiet period can take up to a minute. Requests wait for it; migrations run on every deploy before the application starts.
