@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.modules.auth.router import router as auth_router
+from app.modules.dashboard.router import router as dashboard_router
+from app.modules.onboarding.router import router as onboarding_router
 from app.modules.requests.router import router as requests_router
 from app.modules.users.router import router as users_router
 
@@ -27,4 +29,6 @@ def health():
 api.include_router(auth_router)
 api.include_router(users_router)
 api.include_router(requests_router)
+api.include_router(onboarding_router)
+api.include_router(dashboard_router)
 app.include_router(api)
