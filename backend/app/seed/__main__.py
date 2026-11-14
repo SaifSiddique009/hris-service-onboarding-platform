@@ -10,17 +10,19 @@ from sqlalchemy.orm import Session
 from app import models  # noqa: F401
 from app.core.db import Base, SessionLocal
 from app.modules.users.models import User
+from app.seed.onboarding import seed_onboarding
 from app.seed.people import seed_people
 from app.seed.requests import seed_requests
 
 
 def seed_all(db: Session, today: date) -> dict[str, int]:
-    # A fixed random seed gives the same people and requests on every run; dates follow today.
+    # A fixed random seed gives the same data on every run; dates follow today.
     rng = random.Random(2026)
     users = seed_people(db, today, rng)
     requests = seed_requests(db, users, today, rng)
+    onboardings = seed_onboarding(db, users, today, rng)
     db.commit()
-    return {"employees": len(users), "service requests": requests}
+    return {"employees": len(users), "service requests": requests, "onboardings": onboardings}
 
 
 def main() -> None:
