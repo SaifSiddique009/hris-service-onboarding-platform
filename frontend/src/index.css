@@ -1,9 +1,90 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Fraunces", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-n-0: #fffefb;
+  --color-n-50: #f6f4ed;
+  --color-n-100: #edf0e8;
+  --color-n-150: #e3e8e1;
+  --color-n-200: #dfe5dd;
+  --color-n-300: #c8d0c8;
+  --color-n-400: #9aa59d;
+  --color-n-500: #66736b;
+  --color-n-600: #4e5b53;
+  --color-n-800: #26372f;
+  --color-n-900: #122421;
+
+  --color-page: var(--color-n-50);
+  --color-paper: var(--color-n-0);
+  --color-ink: var(--color-n-800);
+  --color-muted: var(--color-n-500);
+  --color-line: var(--color-n-200);
+  --color-control: var(--color-n-300);
+
+  --color-accent: #296b54;
+  --color-accent-hover: #22594a;
+  --color-accent-press: #1b4a3d;
+  --color-accent-soft: #e3efe7;
+  --color-focus: #207455;
+
+  --color-danger: #a44035;
+  --color-danger-soft: #f9e9e4;
+  --color-danger-wash: #fcf6f3;
+  --color-amber: #8f6118;
+  --color-amber-soft: #fff2d5;
+  --color-blue: #466c91;
+  --color-blue-soft: #e7edf4;
+  --color-plum: #6a5885;
+  --color-plum-soft: #eeeaf3;
+  --color-grey: #56635b;
+  --color-grey-soft: #eaece6;
+
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+
+  --shadow-pop: 0 14px 36px rgb(38 55 47 / 0.14);
+  --shadow-dialog: 0 24px 64px rgb(18 36 33 / 0.28);
+
+  --ease-out-soft: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --animate-rise: rise 0.22s var(--ease-out-soft);
+  --animate-spin: spin 0.8s linear infinite;
 }
 
-body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-page font-sans text-ink antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: #cfe3d7;
+  }
+  a {
+    @apply text-accent underline-offset-[3px] hover:text-accent-hover;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }

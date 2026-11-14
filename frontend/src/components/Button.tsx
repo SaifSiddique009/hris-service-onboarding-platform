@@ -1,24 +1,38 @@
 import type { ButtonHTMLAttributes } from 'react'
+import { cn } from '../lib/cn'
 import { Spinner } from './Spinner'
 
+const base =
+  'inline-flex items-center justify-center gap-2 rounded-sm text-sm font-semibold whitespace-nowrap transition-colors duration-150 disabled:cursor-not-allowed disabled:border-grey-soft disabled:bg-grey-soft disabled:text-[#8a948d]'
+
+const variants = {
+  primary: 'border border-accent bg-accent text-paper hover:border-accent-hover hover:bg-accent-hover active:bg-accent-press',
+  secondary: 'border border-control bg-transparent text-ink hover:bg-n-100 active:border-n-400 active:bg-n-150',
+  danger: 'border border-[#ddb8ae] bg-transparent text-danger hover:bg-danger-soft active:border-danger',
+  ghost: 'border border-transparent bg-transparent px-2.5 font-medium text-ink hover:bg-n-100',
+}
+
+const sizes = {
+  md: 'min-h-10 px-4 max-md:min-h-11',
+  sm: 'min-h-8 px-3 text-[13px] max-md:min-h-11',
+  icon: 'size-10 p-0 max-md:size-11',
+}
+
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary'
+  variant?: keyof typeof variants
+  size?: keyof typeof sizes
   loading?: boolean
 }
 
-const variants = {
-  primary: 'bg-indigo-600 text-white hover:bg-indigo-700',
-  secondary: 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
-}
-
-export function Button({ variant = 'primary', loading, disabled, className = '', children, ...rest }: Props) {
+export function Button({ variant = 'primary', size = 'md', loading, disabled, className, children, ...rest }: Props) {
   return (
     <button
       {...rest}
       disabled={disabled || loading}
-      className={`inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${variants[variant]} ${className}`}
+      aria-busy={loading || undefined}
+      className={cn(base, sizes[size], variants[variant], className)}
     >
-      {loading && <Spinner className="size-4" />}
+      {loading && <Spinner className={cn('size-3.5', variant === 'primary' && 'border-white/35 border-t-white')} />}
       {children}
     </button>
   )

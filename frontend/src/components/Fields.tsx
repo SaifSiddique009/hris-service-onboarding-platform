@@ -1,7 +1,9 @@
+import { Search } from 'lucide-react'
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
+import { cn } from '../lib/cn'
 
 const control =
-  'mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30'
+  'w-full min-h-10 rounded-sm border border-control bg-paper px-3 text-sm font-normal text-ink placeholder:text-n-500 hover:border-n-400 focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent-soft aria-[invalid=true]:border-danger aria-[invalid=true]:ring-3 aria-[invalid=true]:ring-danger-soft disabled:border-grey-soft disabled:bg-grey-soft disabled:text-[#8a948d] max-md:min-h-11'
 
 interface FieldProps {
   label: string
@@ -12,12 +14,12 @@ interface FieldProps {
 
 export function Field({ label, hint, error, children }: FieldProps) {
   return (
-    <label className="block text-sm font-medium text-slate-700">
+    <label className="flex flex-col gap-1.5 text-[13px] font-semibold">
       {label}
       {children}
-      {hint && <span className="mt-1 block text-xs font-normal text-slate-500">{hint}</span>}
+      {hint && <span className="font-normal text-muted">{hint}</span>}
       {error && (
-        <span role="alert" className="mt-1 block text-xs font-normal text-red-600">
+        <span role="alert" className="font-medium text-danger">
           {error}
         </span>
       )}
@@ -26,13 +28,20 @@ export function Field({ label, hint, error, children }: FieldProps) {
 }
 
 export const Input = (props: InputHTMLAttributes<HTMLInputElement>) => (
-  <input {...props} className={`${control} ${props.className ?? ''}`} />
+  <input {...props} className={cn(control, props.className)} />
+)
+
+export const SearchInput = (props: InputHTMLAttributes<HTMLInputElement>) => (
+  <span className="relative block">
+    <Search aria-hidden size={16} strokeWidth={1.8} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+    <Input type="search" {...props} className={cn('pl-[34px]', props.className)} />
+  </span>
 )
 
 export const Select = (props: SelectHTMLAttributes<HTMLSelectElement>) => (
-  <select {...props} className={`${control} ${props.className ?? ''}`} />
+  <select {...props} className={cn(control, props.className)} />
 )
 
 export const Textarea = (props: TextareaHTMLAttributes<HTMLTextAreaElement>) => (
-  <textarea rows={4} {...props} className={`${control} ${props.className ?? ''}`} />
+  <textarea rows={4} {...props} className={cn(control, 'min-h-26 resize-y py-2.5 leading-normal', props.className)} />
 )
