@@ -11,6 +11,8 @@ import { MyTasksPage } from './features/onboarding/MyTasksPage'
 import { TeamOnboardingPage } from './features/onboarding/TeamOnboardingPage'
 import { TemplatesPage } from './features/onboarding/TemplatesPage'
 import { PeoplePage } from './features/people/PeoplePage'
+import { NewRequestPage } from './features/requests/NewRequestPage'
+import { RequestDetailPage } from './features/requests/RequestDetailPage'
 import { RequestsPage } from './features/requests/RequestsPage'
 
 export default function App() {
@@ -22,6 +24,8 @@ export default function App() {
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
           <Route path="/requests" element={<RequestsPage />} />
+          <Route path="/requests/new" element={<NewRequestPage />} />
+          <Route path="/requests/:id" element={<RequestDetailPage />} />
           <Route path="/onboarding/me" element={<MyOnboardingPage />} />
           <Route path="/onboarding/tasks" element={<MyTasksPage />} />
           <Route element={<RequireRole roles={['MANAGER', 'HR_ADMIN']} />}>

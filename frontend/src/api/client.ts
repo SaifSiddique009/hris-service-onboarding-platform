@@ -8,11 +8,13 @@ export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
 export class ApiError extends Error {
   status: number
   code: string
+  fields: Record<string, string>
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, fields: Record<string, string> = {}) {
     super(message)
     this.status = status
     this.code = code
+    this.fields = fields
   }
 }
 
@@ -39,6 +41,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       res.status,
       body?.error?.code ?? 'UNKNOWN',
       body?.error?.message ?? res.statusText,
+      body?.error?.details?.fields,
     )
   }
   return res.status === 204 ? (undefined as T) : res.json()

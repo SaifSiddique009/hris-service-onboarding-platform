@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import type { Role } from '../api/types'
+import { roleLabel } from '../lib/format'
 import { useAuth } from '../features/auth/AuthContext'
 import { Badge } from './Badge'
 import { Button } from './Button'
 
 const links: { to: string; label: string; roles?: Role[] }[] = [
   { to: '/dashboard', label: 'Dashboard', roles: ['HR_ADMIN'] },
-  { to: '/requests', label: 'My requests' },
+  { to: '/requests', label: 'Requests' },
   { to: '/onboarding/me', label: 'My onboarding' },
   { to: '/onboarding/tasks', label: 'My tasks' },
   { to: '/onboarding', label: 'Team onboarding', roles: ['MANAGER', 'HR_ADMIN'] },
@@ -15,8 +16,6 @@ const links: { to: string; label: string; roles?: Role[] }[] = [
   { to: '/people', label: 'People', roles: ['HR_ADMIN'] },
   { to: '/assistant', label: 'Assistant', roles: ['HR_ADMIN'] },
 ]
-
-const roleLabel: Record<Role, string> = { EMPLOYEE: 'Employee', MANAGER: 'Manager', HR_ADMIN: 'HR Admin' }
 
 export function AppShell() {
   const { user, logout } = useAuth()
@@ -42,7 +41,7 @@ export function AppShell() {
         </div>
         <div className="flex items-center gap-3">
           <span className="hidden text-sm font-medium sm:inline">{user.full_name}</span>
-          <Badge>{roleLabel[user.role]}</Badge>
+          <Badge>{roleLabel(user.role)}</Badge>
           <Button variant="secondary" onClick={logout}>
             Log out
           </Button>
