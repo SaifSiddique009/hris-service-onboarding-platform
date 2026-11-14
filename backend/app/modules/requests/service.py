@@ -122,7 +122,8 @@ def list_requests(db: Session, user: User, view: str, filters: dict, page: int, 
 def get_request(db: Session, user: User, request_id: int, lock: bool = False) -> ServiceRequest:
     query = visible_requests(user).where(ServiceRequest.id == request_id)
     if lock:
-        query = query.with_for_update(of=ServiceRequest)
+        # Re-read after locking, in case this session loaded the row earlier.
+        query = query.with_for_update(of=ServiceRequest).execution_options(populate_existing=True)
     request = db.scalar(query)
     if not request:
         raise NotFound("Request not found")
