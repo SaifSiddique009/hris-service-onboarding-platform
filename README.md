@@ -35,7 +35,7 @@ Everyone can change their own password on the Account page. An HR Admin creates 
 ### Things worth trying
 
 - **Access control.** Open a request as HR Admin, copy its URL, then sign in as an employee who is not involved and paste it. It shows "not found", the same as a request that does not exist.
-- **Request lifecycle.** As `lim.wei.jie`, open a Submitted request from "My team" and assign it. Sign in as the assignee to start and resolve it, then as the requester to close or reopen it. Each page shows only the buttons that person is allowed to use.
+- **Request lifecycle.** As `imran.hossain`, open a Submitted request in "Department queue" and assign it. Sign in as the assignee to start and resolve it, then as the requester to close or reopen it. Each page shows only the buttons that person is allowed to use.
 - **Confidential requests.** `jubayer.faruk` has an HR query. His manager `sadia.chowdhury@nextventure.example` does not see it under "My team".
 - **Dependencies.** As `imran.hossain`, complete "Issue laptop and peripherals" in "My tasks". The task that was Blocked behind it becomes available at once.
 - **Assistant.** As HR Admin, ask "Which new hires are still waiting on IT equipment?" or "How many IT Equipment requests are unresolved in Cyprus?". Each answer shows the query that was run and the rows it returned.
@@ -43,10 +43,10 @@ Everyone can change their own password on the Account page. An HR Admin creates 
 ## What is in the platform
 
 **Service requests**
-- Five categories and four priorities; lifecycle Submitted, Assigned, In Progress, Resolved, Closed.
-- Each action has a rule for who may take it: a manager or HR Admin assigns, only the assignee starts and resolves, the requester confirms or reopens.
+- Six categories, two of them confidential, and four priorities; lifecycle Submitted, Assigned, In Progress, Resolved, Closed.
+- Each action has a rule for who may take it: the requester's manager, a manager of the team that owns the category, or an HR Admin assigns or rejects; only the assignee starts and resolves; the requester closes or reopens, and an HR Admin can also close.
 - A request can also end early: withdrawn by the requester or rejected with a reason. Closed requests record why they closed.
-- Comment threads, a full status history, and an assignment history.
+- One activity feed per request: comments and status changes together, with who each request was assigned to.
 - Views: my requests, assigned to me, my team, my department's queue, and (HR Admin) all, filterable by status, category, priority and country.
 
 **Onboarding**
@@ -58,7 +58,7 @@ Everyone can change their own password on the Account page. An HR Admin creates 
 **Shared**
 - Email and password sign-in, three roles, and scopes enforced on the server for every list and every record.
 - HR Admin dashboard: headcount by country and department, open requests by status and category, onboarding progress, and a cross-module view of new hires who are still waiting on a service request.
-- People directory with filters, adding an employee, and deactivating an account.
+- People directory with filters, adding and editing an employee, disabling a sign-in, and setting a new password.
 
 **AI assistant** (the "Smart Query Assistant" option)
 - The model never writes SQL. It chooses from six typed, read-only queries, the same functions that feed the dashboard, so "open" or "overdue" means the same thing in both places.
@@ -130,7 +130,7 @@ The script is in [backend/app/seed](backend/app/seed). It uses a fixed random se
 | Data | Seeded |
 |---|---|
 | Employees | 100: Bangladesh 40, Malaysia 25, Sri Lanka 20, Cyprus 15; 7 departments; 3 HR Admins, 13 Managers, 84 Employees; active, on probation and on notice |
-| Service requests | 37 across all 5 categories, 5 statuses and 4 priorities; 9 with comment threads; some withdrawn, rejected and reopened |
+| Service requests | 37 across 5 of the 6 categories (Account Access fills only from "Forgot your password?"), 5 statuses and 4 priorities; 9 with comment threads; some withdrawn, rejected and reopened |
 | Onboarding | 2 templates of 11 tasks; 8 new hires (2 per country) who joined in the last 60 days, with completed, in-progress, not-started, overdue and blocked tasks |
 
 ### Tests and checks
@@ -154,8 +154,8 @@ backend/
     core/            config, database session, security, auth and role dependencies,
                      state machine helper, errors
     modules/
-      auth/          login, logout, current user
-      users/         directory, departments, countries
+      auth/          login, logout, current user, change and forgot password
+      users/         directory, departments, countries, password set by HR
       requests/      categories, requests, assignments, comments
       onboarding/    templates, checklists, tasks
       dashboard/     reports across both modules
@@ -166,7 +166,8 @@ backend/
 frontend/
   src/
     api/             typed API client and types
-    features/        one folder per domain, mirroring the backend modules
+    features/        one folder per screen area: requests, onboarding, people,
+                     dashboard, assistant, account, auth
     components/      shared UI
     lib/             formatting helpers
 ```

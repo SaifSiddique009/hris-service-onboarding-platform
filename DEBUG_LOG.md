@@ -297,7 +297,7 @@ def _compact(schema):
     return {key: _compact(value) for key, value in schema.items() if key != "title"}
 ```
 
-Measured result: schemas went from 5,759 to 4,126 characters, and a run of eight questions in a row was answered eight out of eight.
+Measured result: schemas went from 5,759 to 4,126 characters (4,222 today, after one more filter was added; the test allows 4,500), and a run of eight questions in a row was answered eight out of eight.
 
 One detail from writing the prevention test is worth recording. I first set the size limit in the test to 3,500 characters, a number I had guessed. The test failed at 4,126. The limit is now 4,500, taken from the measurement.
 

@@ -40,7 +40,7 @@ flowchart LR
             DASH["dashboard"]
             AI["assistant"]
         end
-        CORE["core: permissions, scopes,<br/>state machine helper, errors"]
+        CORE["core: auth and role gates,<br/>state machine helper, errors"]
         MW --> Modules
         Modules --> CORE
     end
@@ -99,7 +99,7 @@ What is shared, and therefore exists exactly once:
 - **People.** Requesters, assignees, comment authors, new hires, task owners and managers are all rows in `users`. Neither module stores a copy of a name, country or department.
 - **Reporting line.** Every user row has a `manager_id` column holding the id of that person's manager. A manager's team is every user whose `manager_id` holds that manager's id. Both modules use this one column, so "team" means the same thing for team requests and for direct reports' onboarding.
 - **Departments.** A request category is owned by a department; an onboarding task is owned by a department. Both point at the same `departments` table, and both use the same department head as the default owner.
-- **Access rules.** One permissions module answers "what can this user see?" for both workflows.
+- **Access rules.** The same pattern answers "what can this user see?" in both workflows: one scope function per resource (`visible_*`), used by every list and detail query, with the role gates in `core`.
 - **Transition handling.** Both state machines are declared as tables of allowed actions. One small helper checks that an action is allowed from the current status and for this actor; each module then applies the change and records its history row in the same transaction.
 - **Read models.** The dashboard and the AI assistant call the same aggregation functions, so both use one definition of terms like "open" and "overdue".
 
@@ -286,7 +286,7 @@ Rules checked when a user is created or changed:
 | is_confidential | boolean | not null, default false; see section 4.1 |
 | is_active | boolean | not null, default true |
 
-Seeded with IT Equipment (IT), Software Access (IT), HR Query (People & Culture, confidential), Facilities (Operations), Other (no owner).
+Seeded with IT Equipment (IT), Software Access (IT), Account Access (People & Culture, confidential), HR Query (People & Culture, confidential), Facilities (Operations), Other (no owner).
 
 **`service_requests`**
 
@@ -541,9 +541,9 @@ TaskEvent       { from_status, to_status, actor: UserSummary, note, created_at }
 | GET | `/auth/me` | | `User` | Any |
 | POST | `/auth/password` | `{ current_password, new_password }` | The login response, with a new token. Every older token of the caller stops working. `422` names the field: wrong current password, weak new password, or a new password equal to the current one | Any |
 | POST | `/auth/forgot-password` | `{ email }` | `{ message }`, the same reply whether or not the email has an account | Public |
+| GET | `/health` | | `{ status }` | Public |
 
 A person who forgot their password asks from the sign-in page. For an active account this raises an ordinary service request in that person's name, in the confidential "Account Access" category, so it reaches HR Admin through the normal queue and has a history like any other request. At most one unresolved reset request exists per person. An HR Admin checks who is asking and sets a new password with `POST /users/{id}/password` (section 3.4). That also ends every session the person has. The admin passes the new password on privately and the person changes it on their Account page. Reset by email is not included (section 8).
-| GET | `/health` | | `{ status }` | Public |
 
 ### 3.4 Users
 
@@ -567,7 +567,7 @@ A person who forgot their password asks from the sign-in page. For an active acc
 | POST | `/requests` | `{ title, description, category_id, priority }` | `201 RequestDetail` | Any |
 | GET | `/requests` | query: `view` (`mine`, `assigned`, `team`, `queue`, `all`), `status, category_id, priority, country, search, page, page_size`. `search` matches the title or the reference (`REQ-0055` or `55`) | `Page<RequestSummary>` | Scoped |
 | GET | `/requests/{id}` | | `RequestDetail` | Scoped |
-| POST | `/requests/{id}/assign` | `{ assignee_id, note? }` | `RequestDetail`; `409 ALREADY_ASSIGNED` if the request is no longer Submitted | A triager of the request (section 4.1) |
+| POST | `/requests/{id}/assign` | `{ assignee_id, note? }` | `RequestDetail`; `409 ALREADY_ASSIGNED` if someone already holds it, `409 INVALID_TRANSITION` from any other status that is not Submitted | A triager of the request (section 4.1) |
 | POST | `/requests/{id}/reassign` | `{ assignee_id, note? }` | `RequestDetail` | A triager of the request |
 | POST | `/requests/{id}/transitions` | `{ action, note? }` where `action` is `start`, `resolve`, `reopen`, `close`, `withdraw` or `reject` | `RequestDetail` | Per action (section 5.1) |
 | POST | `/requests/{id}/comments` | `{ body }` | `201 Comment` | Anyone who can see the request, until it is Closed |
@@ -714,7 +714,7 @@ Two kinds of rule appear in this table, and the design treats them separately:
 - **Role rules** depend only on who the caller is ("only HR Admin manages templates").
 - **Relationship rules** depend on the caller's link to a specific row ("only the assignee can start work"). An assignee or a task owner is not a role. It is any user who happens to be linked to that row.
 
-**Confidential categories.** HR Query is marked confidential. A question about pay, health or a complaint, possibly about the requester's own manager, must not land in that manager's list. Requests in a confidential category skip the manager entirely: only the requester, the person HR assigns, and HR Admin can see them, and only HR Admin can triage them. Because an assignee can read the request, a confidential request can only be assigned to someone in the department that owns the category (People & Culture for HR Query), and never to the requester's manager.
+**Confidential categories.** HR Query and Account Access are marked confidential. A question about pay, health or a complaint, possibly about the requester's own manager, must not land in that manager's list. Requests in a confidential category skip the manager entirely: only the requester, the person HR assigns, and HR Admin can see them, and only HR Admin can triage them. Because an assignee can read the request, a confidential request can only be assigned to someone in the department that owns the category (People & Culture for both), and never to the requester's manager.
 
 This protects against the line manager, not against HR itself. Every HR Admin can read every request, so a complaint about an HR Admin, or about a manager who also holds the HR Admin role, needs a channel outside this platform. Closing that gap would take a per-case access list with named reviewers.
 
@@ -792,7 +792,7 @@ stateDiagram-v2
 | Action | From | To | Who | Conditions and side effects |
 |---|---|---|---|---|
 | submit | (none) | Submitted | Any user | Creates the request and the first status event. |
-| assign | Submitted | Assigned | Triager | `assignee_id` required. The assignee must be an active user other than the requester, and for a confidential category must not be the requester's manager. Writes an assignment row. |
+| assign | Submitted | Assigned | Triager | `assignee_id` required. The assignee must be an active user other than the requester. For a confidential category the assignee must also be in the department that owns the category and must not be the requester's manager. Writes an assignment row. |
 | reassign | Assigned, In Progress | Assigned | Triager | Same assignee rules. Writes a new assignment row; work restarts with the new assignee. |
 | withdraw | Submitted | Closed | Requester | Closure reason `WITHDRAWN`. Sets `closed_at`. |
 | reject | Submitted, Assigned | Closed | Triager | A note saying why is required. Closure reason `REJECTED`. Sets `closed_at`. |
@@ -881,7 +881,7 @@ A checklist has no stored status either. It is active while any of its tasks is 
 
 **Considered:** a per-request "private" checkbox set by the requester, against a flag on the category.
 
-**Chosen:** a flag on the category. HR Query is confidential, and such requests bypass the manager and go to HR Admin for triage. The requester does not have to know to ask for privacy, and a manager cannot tell from a missing row that something was filed.
+**Chosen:** a flag on the category. HR Query and Account Access are confidential, and such requests bypass the manager and go to HR Admin for triage. The requester does not have to know to ask for privacy, and a manager cannot tell from a missing row that something was filed.
 
 **Cost:** a manager's team view is knowingly incomplete, and the scope rule has one more condition to test. A per-request flag could be added on top for sensitive cases in other categories.
 
@@ -980,7 +980,7 @@ Rules that must hold at all times, and what guarantees each one.
 | A request being worked on (Assigned, In Progress, Resolved) has an assignee | Check constraint |
 | A request is Closed if and only if it has a closure reason | Check constraint |
 | A status changes only through a declared action, taken by a permitted actor | Transition table and helper, with the row locked |
-| Every status change has a history row | Written in the same transaction by the helper |
+| Every status change has a history row | Written in the same transaction by the module's service, right after the shared helper has checked the action |
 | A task is never started or completed while its dependency is incomplete, and a completed task is never reopened under a started dependent | Dependency checks made while holding the checklist lock |
 | A task depends only on a task in the same checklist; a template task only on one in the same template | Composite foreign keys |
 | Dependencies never form a loop | Validation when a template task is saved, made while holding the template lock; checklists copy an already valid chain |
@@ -1021,13 +1021,13 @@ Rules that must hold at all times, and what guarantees each one.
 
 ## 9. Testing approach
 
-Tests run against PostgreSQL, not an in-memory substitute, because the rules rely on enum types, check constraints, row locks and time zones. Each test runs inside a transaction that is rolled back, except the two-connection test, which has to commit and cleans up after itself.
+Tests run against PostgreSQL, not an in-memory substitute, because the rules rely on enum types, check constraints, row locks and time zones. Each test runs inside a transaction that is rolled back, except the two-connection test, which has to commit and cleans up after itself, and the migration test, which builds its own empty database.
 
 | What | How it is tested |
 |---|---|
 | Access scopes | Every list and detail endpoint is called as each role, asserting both what is returned and what is not. A row outside the scope must look exactly like a row that does not exist. |
 | State machines | Each action is tried from statuses where it is allowed and where it is not, by a permitted and a non-permitted actor, asserting success, 409 or 403. |
-| Invariants | Each row of section 7 has at least one test that tries to break it. |
+| Invariants | The rows of section 7 are tested by trying to break them: the database refuses the impossible state, or the API refuses the action. |
 | Concurrency | The checklist lock is tested with two real database connections acting at the same moment: reopening a task while its dependent is being started. |
 | Dates | Due-date arithmetic is tested with fixed dates. The overdue rule is tested with the same due date for two new hires in time zones 26 hours apart, where it must be overdue for one and not for the other. |
 | Seed data | The seed script runs in a test that asserts the required counts and state mix. |
