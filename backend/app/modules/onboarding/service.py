@@ -126,7 +126,9 @@ def update_template_task(db: Session, template_id: int, task_id: int, data: Temp
     if not task:
         raise NotFound("Task not found")
     for field, value in data.model_dump(exclude_unset=True).items():
-        setattr(task, field, value)
+        # A null only means something for the two fields that can be cleared.
+        if value is not None or field in ("depends_on_task_id", "owner_department_id"):
+            setattr(task, field, value)
     _check_template_task(db, template, task)
     db.commit()
     return task

@@ -6,14 +6,21 @@ import jwt
 from app.core.config import settings
 
 ALGORITHM = "HS256"
+MAX_PASSWORD_BYTES = 72
+DUMMY_HASH = bcrypt.hashpw(b"no such account", bcrypt.gensalt()).decode()
 
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
-def verify_password(password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(password.encode(), password_hash.encode())
+def verify_password(password: str, password_hash: str | None) -> bool:
+    """With no hash (unknown account) it still does the work, so timing does not reveal emails."""
+    secret = password.encode()
+    # bcrypt rejects more than 72 bytes with an error; such a password cannot be right.
+    if len(secret) > MAX_PASSWORD_BYTES:
+        return False
+    return bcrypt.checkpw(secret, (password_hash or DUMMY_HASH).encode()) and bool(password_hash)
 
 
 def create_token(user_id: int, token_version: int) -> str:

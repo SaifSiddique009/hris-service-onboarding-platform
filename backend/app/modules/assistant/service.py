@@ -11,6 +11,7 @@ from app.modules.requests.models import RequestCategory
 from app.modules.users.models import Country, Department, User
 
 MAX_TOOL_ROUNDS = 3
+MAX_CALLS_PER_ROUND = 4
 OUT_OF_SCOPE = (
     "I could not work that out from the platform's data. I can answer questions about employee "
     "headcount, service requests and onboarding progress."
@@ -81,7 +82,7 @@ def _converse(db: Session, question: str, used: list[dict]) -> str:
     failures = 0
     for _ in range(MAX_TOOL_ROUNDS):
         message = llm.chat(messages, tools.SCHEMAS)
-        calls = message.get("tool_calls") or []
+        calls = (message.get("tool_calls") or [])[:MAX_CALLS_PER_ROUND]
         if not calls:
             return message.get("content") or OUT_OF_SCOPE
         messages.append(

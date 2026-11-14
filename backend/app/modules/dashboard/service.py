@@ -19,6 +19,7 @@ REQUEST_STATES = {
 Requester = aliased(User)
 Hire = aliased(User)
 INCOMPLETE = OnboardingTask.status != TaskStatus.COMPLETED
+ROW_LIMIT = 20
 
 
 def _grouped(db: Session, query: Select, label) -> list[dict]:
@@ -179,7 +180,7 @@ def onboarding_progress(db: Session, country=None, active_only=False) -> list[di
         }
         for checklist in checklists
         if checklist.is_active or not active_only
-    ]
+    ][:ROW_LIMIT]
 
 
 TASK_STATES = {
@@ -282,7 +283,7 @@ def new_hires_with_open_requests(db: Session, category=None) -> list[dict]:
             {"new_hire": hire.full_name, "country": hire.country.name, "open_requests": []},
         )
         entry["open_requests"].append(request_row(request))
-    return list(by_hire.values())
+    return list(by_hire.values())[:ROW_LIMIT]
 
 
 def work_held_by_inactive_users(db: Session) -> dict:

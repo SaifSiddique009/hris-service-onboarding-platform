@@ -1,4 +1,4 @@
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,7 @@ from app.modules.users.models import Country, Department, User, UserRole
 from app.modules.users.schemas import UserCreate, UserUpdate
 
 MANAGING_ROLES = (UserRole.MANAGER, UserRole.HR_ADMIN)
+REPORTING_LINE_LOCK = 7001
 
 
 def visible_users(user: User) -> Select[tuple[User]]:
@@ -64,14 +65,17 @@ def _check_references(db: Session, country: str | None, department_id: int | Non
 def _check_manager(db: Session, user_id: int | None, manager_id: int | None) -> None:
     if manager_id is None:
         return
-    manager = db.get(User, manager_id)
+    # One reporting-line change at a time, so two edits cannot each close half of a loop.
+    db.execute(select(func.pg_advisory_xact_lock(REPORTING_LINE_LOCK)))
+    manager = db.get(User, manager_id, populate_existing=True)
     if not manager or not manager.is_active or manager.role not in MANAGING_ROLES:
         raise Invalid("The manager must be an active Manager or HR Admin")
     # Walk up the chain: the new manager must not report, directly or not, to this user.
     while manager:
         if manager.id == user_id:
             raise Invalid("This would make the reporting line loop back on itself")
-        manager = manager.manager
+        above = manager.manager_id
+        manager = db.get(User, above, populate_existing=True) if above else None
 
 
 def open_work(db: Session, user_id: int) -> int:
@@ -101,10 +105,21 @@ def update_user(db: Session, user_id: int, data: UserUpdate) -> User:
     user = db.get(User, user_id)
     if not user:
         raise NotFound("User not found")
-    changes = data.model_dump(exclude_unset=True)
+    # An explicit null only means something for the manager; everywhere else it is ignored.
+    changes = {
+        field: value
+        for field, value in data.model_dump(exclude_unset=True).items()
+        if value is not None or field == "manager_id"
+    }
     _check_references(db, changes.get("country"), changes.get("department_id"))
-    if "manager_id" in changes:
+    if changes.get("manager_id"):
         _check_manager(db, user.id, changes["manager_id"])
+        if requests.holds_confidential_request_from(db, changes["manager_id"], user.id):
+            raise Conflict(
+                "This person is handling a confidential request from the employee. "
+                "Reassign that request first.",
+                "CONFIDENTIAL_REQUEST",
+            )
 
     has_reports = db.scalar(select(func.count()).where(User.manager_id == user.id))
     if changes.get("role") == UserRole.EMPLOYEE and has_reports:
@@ -112,12 +127,18 @@ def update_user(db: Session, user_id: int, data: UserUpdate) -> User:
     if changes.get("is_active") is False and user.is_active:
         # Never blocked by unfinished work: cutting access must not wait on reassignment.
         user.token_version += 1
+    moved = changes.get("department_id", user.department_id) != user.department_id
+    if moved or changes.get("role") == UserRole.EMPLOYEE:
+        # A head must be a manager inside the department, so the pointer cannot outlive either.
+        db.execute(update(Department).where(Department.head_id == user.id).values(head_id=None))
 
     if "country" in changes:
         user.country_code = changes.pop("country").upper()
     for field, value in changes.items():
         setattr(user, field, value)
     db.commit()
+    # The manager, department and country objects were loaded before the ids changed.
+    db.refresh(user)
     return user
 
 
@@ -136,4 +157,5 @@ def set_department_head(db: Session, department_id: int, head_id: int | None) ->
             raise Invalid("The head must be an active Manager or HR Admin in this department")
     department.head_id = head_id
     db.commit()
+    db.refresh(department)
     return department

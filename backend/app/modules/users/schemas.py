@@ -1,8 +1,9 @@
 from datetime import date
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.schemas import Out
+from app.core.security import MAX_PASSWORD_BYTES
 from app.modules.users.models import EmploymentStatus, UserRole
 
 EMAIL = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
@@ -47,6 +48,14 @@ class UserCreate(BaseModel):
     full_name: str = Field(min_length=2, max_length=120)
     email: str = Field(pattern=EMAIL, max_length=200)
     password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def fits_bcrypt(cls, value: str) -> str:
+        if len(value.encode()) > MAX_PASSWORD_BYTES:
+            raise ValueError("Password is too long")
+        return value
+
     job_title: str = Field(min_length=2, max_length=120)
     role: UserRole
     country: str = Field(min_length=2, max_length=2)

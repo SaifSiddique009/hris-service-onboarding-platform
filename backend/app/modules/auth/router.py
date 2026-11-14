@@ -30,7 +30,8 @@ class LoginOut(BaseModel):
 def login(data: LoginIn, db: Db):
     user = db.scalar(select(User).where(User.email == data.email.strip().lower()))
     # One message for every failure, so the response does not reveal which emails exist.
-    if not user or not user.is_active or not verify_password(data.password, user.password_hash):
+    password_ok = verify_password(data.password, user.password_hash if user else None)
+    if not user or not user.is_active or not password_ok:
         raise Unauthorized("Incorrect email or password", "INVALID_CREDENTIALS")
     user.last_login_at = datetime.now(UTC)
     db.commit()

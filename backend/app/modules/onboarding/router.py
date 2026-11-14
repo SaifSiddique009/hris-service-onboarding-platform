@@ -58,7 +58,7 @@ def get_template(template_id: int, db: Db):
 
 @templates.patch("/{template_id}", response_model=TemplateDetail)
 def update_template(template_id: int, data: TemplateUpdate, db: Db):
-    return service.update_template(db, template_id, data.model_dump(exclude_unset=True))
+    return service.update_template(db, template_id, data.model_dump(exclude_none=True))
 
 
 @templates.post("/{template_id}/tasks", response_model=TemplateTaskOut, status_code=201)
