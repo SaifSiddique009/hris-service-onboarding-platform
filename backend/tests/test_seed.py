@@ -54,3 +54,8 @@ def test_seed_meets_the_required_mix(db):
     assert sum(t.is_blocked for t in tasks) >= 2
     assert sum(t.depends_on_task_id is not None for t in tasks) >= len(checklists) * 5
     assert any(not c.is_active for c in checklists) and any(c.is_active for c in checklists)
+    by_id = {t.id: t for t in tasks}
+    for task in tasks:
+        waited_for = by_id.get(task.depends_on_task_id)
+        if task.started_at and waited_for:
+            assert task.started_at >= waited_for.completed_at, task.title

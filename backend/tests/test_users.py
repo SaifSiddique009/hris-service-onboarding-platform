@@ -167,3 +167,57 @@ def test_department_head_must_manage_in_that_department(client, world):
     assert (
         client.patch(url, json={"head_id": world.it_manager.id}, headers=headers).status_code == 200
     )
+
+
+def test_null_values_in_an_update_are_ignored_not_crashes(client, world):
+    body = {"role": None, "country": None, "department_id": None, "is_active": None}
+    response = client.patch(
+        f"{API}/users/{world.employee.id}", json=body, headers=auth(world.admin)
+    )
+    assert response.status_code == 200
+    assert response.json()["role"] == "EMPLOYEE"
+    # A null manager is meaningful: it removes the manager.
+    cleared = client.patch(
+        f"{API}/users/{world.employee.id}", json={"manager_id": None}, headers=auth(world.admin)
+    )
+    assert cleared.json()["manager"] is None
+
+    moved = client.patch(
+        f"{API}/users/{world.employee.id}",
+        json={"manager_id": world.it_manager.id, "department_id": world.it.id, "country": "cy"},
+        headers=auth(world.admin),
+    ).json()
+    assert (moved["manager"]["full_name"], moved["department"]["name"]) == ("IT Manager", "IT")
+    assert moved["country"]["code"] == "CY"
+
+
+def test_head_pointer_does_not_outlive_the_role_or_the_department(client, world, db):
+    headers = auth(world.admin)
+    world.it_engineer.manager_id = world.manager.id
+    db.flush()
+    client.patch(f"{API}/users/{world.it_manager.id}", json={"role": "EMPLOYEE"}, headers=headers)
+    client.patch(
+        f"{API}/users/{world.manager.id}", json={"department_id": world.it.id}, headers=headers
+    )
+    departments = client.get(f"{API}/departments", headers=headers).json()
+    assert {d["name"]: d["head"] for d in departments} == {
+        "Engineering": None,
+        "IT": None,
+        "People & Culture": None,
+    }
+
+
+def test_password_longer_than_bcrypt_allows_is_rejected_cleanly(client, world):
+    long_bytes = new_user(world, password="é" * 40)
+    assert (
+        client.post(f"{API}/users", json=long_bytes, headers=auth(world.admin)).status_code == 422
+    )
+
+
+def test_nobody_can_be_their_own_manager(client, world):
+    response = client.patch(
+        f"{API}/users/{world.manager.id}",
+        json={"manager_id": world.manager.id},
+        headers=auth(world.admin),
+    )
+    assert response.status_code == 422

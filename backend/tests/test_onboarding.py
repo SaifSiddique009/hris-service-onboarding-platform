@@ -4,7 +4,9 @@ import pytest
 from conftest import auth
 from sqlalchemy.exc import IntegrityError
 
+from app.modules.onboarding import service as onboarding
 from app.modules.onboarding.models import DeadlineUnit, OnboardingTask
+from app.modules.onboarding.schemas import TemplateTaskCreate
 from app.modules.onboarding.service import due_date
 from app.modules.users.models import Country
 
@@ -368,4 +370,51 @@ def test_database_refuses_a_dependency_from_another_checklist(db, world, assign)
     task = db.get(OnboardingTask, second["id"])
     with db.begin_nested(), pytest.raises(IntegrityError):
         task.depends_on_task_id = first["id"]
+        db.flush()
+
+
+def test_database_refuses_a_department_task_without_a_department(db, assign):
+    task = db.get(OnboardingTask, tasks_of(assign())["Create account"]["id"])
+    with db.begin_nested(), pytest.raises(IntegrityError):
+        task.owner_department_id = None
+        db.flush()
+
+
+TASK_STATUSES = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"]
+
+
+@pytest.fixture
+def task_in(assign, act, world):
+    def _task_in(status):
+        task = tasks_of(assign())["Create account"]
+        for action in ["start", "complete"][: TASK_STATUSES.index(status)]:
+            assert act(world.it_manager, task, action).status_code == 200
+        return task
+
+    return _task_in
+
+
+@pytest.mark.parametrize("status", TASK_STATUSES)
+def test_every_task_action_follows_the_table(status, task_in, act, world):
+    task = task_in(status)
+    for name, action in onboarding.ACTIONS.items():
+        allowed_here = status in action.sources
+        # The new hire can see the task but does not own it.
+        seen_but_not_owned = act(world.employee, task, name).status_code
+        assert seen_but_not_owned == (403 if allowed_here else 409), (name, status)
+        if not allowed_here:
+            assert act(world.it_manager, task, name).status_code == 409, (name, status)
+
+
+def test_database_refuses_a_template_dependency_from_another_template(db, world, template):
+    other = onboarding.create_template(db, world.admin, "Second", "Another template")
+    base = {
+        "description": "Step",
+        "owner_kind": "LINE_MANAGER",
+        "deadline_unit": "DAY",
+        "deadline_value": 1,
+    }
+    task = onboarding.add_template_task(db, other.id, TemplateTaskCreate(title="Step", **base))
+    with db.begin_nested(), pytest.raises(IntegrityError):
+        task.depends_on_task_id = template["tasks"][0]["id"]
         db.flush()

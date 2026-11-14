@@ -56,3 +56,10 @@ def test_role_change_applies_to_an_existing_token(client, world, db):
     world.employee.role = "HR_ADMIN"
     db.flush()
     assert client.get(f"{API}/users", headers=headers).status_code == 200
+
+
+def test_over_long_password_is_a_plain_401_for_known_and_unknown_emails(client, world):
+    known = login(client, world.employee.email, "a" * 100)
+    unknown = login(client, "nobody@example.test", "a" * 100)
+    assert known.status_code == unknown.status_code == 401
+    assert known.json() == unknown.json()

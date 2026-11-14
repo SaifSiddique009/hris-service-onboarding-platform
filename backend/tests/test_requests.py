@@ -1,7 +1,9 @@
 import pytest
 from conftest import auth
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
+from app.modules.requests import service
 from app.modules.requests.models import RequestCategory, ServiceRequest
 
 API = "/api/v1"
@@ -284,3 +286,104 @@ def test_database_refuses_impossible_states(db, world, categories):
         with db.begin_nested(), pytest.raises(IntegrityError):
             db.add(impossible)
             db.flush()
+
+
+def test_assignee_of_a_confidential_request_cannot_become_the_requesters_manager(
+    client, submit, do, world
+):
+    request = submit(world.employee, "hr")
+    do(world.admin, request, "assign", assignee=world.it_manager)
+    url = f"{API}/users/{world.employee.id}"
+    refused = client.patch(url, json={"manager_id": world.it_manager.id}, headers=auth(world.admin))
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "CONFIDENTIAL_REQUEST"
+
+    do(world.admin, request, "reassign", assignee=world.it_engineer)
+    allowed = client.patch(url, json={"manager_id": world.it_manager.id}, headers=auth(world.admin))
+    assert allowed.status_code == 200
+    assert fetch(client, world.it_manager, request).status_code == 404
+
+
+ALL_STATUSES = ["SUBMITTED", "ASSIGNED", "IN_PROGRESS", "RESOLVED", "CLOSED"]
+# For each action, someone who can see the request but may not take that action.
+WRONG_ACTOR = {
+    "assign": "employee",
+    "reassign": "employee",
+    "reject": "employee",
+    "start": "admin",
+    "resolve": "admin",
+    "withdraw": "admin",
+    "reopen": "admin",
+    "close": "manager",
+}
+
+
+@pytest.fixture
+def request_in(submit, do, world):
+    """A request raised by Employee and moved to the given status."""
+
+    def _request_in(status):
+        request = submit(world.employee)
+        steps = [
+            (world.manager, "assign"),
+            (world.it_engineer, "start"),
+            (world.it_engineer, "resolve"),
+            (world.employee, "close"),
+        ]
+        for actor, action in steps[: ALL_STATUSES.index(status)]:
+            done = do(actor, request, action, note="Done", assignee=world.it_engineer)
+            assert done.status_code == 200, done.text
+        return request
+
+    return _request_in
+
+
+@pytest.mark.parametrize("status", ALL_STATUSES)
+def test_every_action_is_a_conflict_from_a_status_it_does_not_start_from(
+    status, request_in, do, world
+):
+    request = request_in(status)
+    for name, action in service.ACTIONS.items():
+        if status not in action.sources:
+            response = do(world.admin, request, name, note="x", assignee=world.colleague)
+            assert response.status_code == 409, (name, status, response.text)
+
+
+@pytest.mark.parametrize("status", ALL_STATUSES)
+def test_every_action_is_forbidden_to_someone_who_can_see_but_may_not_act(
+    status, request_in, do, world
+):
+    request = request_in(status)
+    for name, action in service.ACTIONS.items():
+        if status in action.sources:
+            actor = getattr(world, WRONG_ACTOR[name])
+            response = do(actor, request, name, note="x", assignee=world.colleague)
+            assert response.status_code == 403, (name, status, response.text)
+
+
+def test_withdrawn_request_cannot_be_assigned_and_the_message_says_why(submit, do, world):
+    request = submit(world.employee)
+    do(world.employee, request, "withdraw")
+    response = do(world.manager, request, "assign", assignee=world.it_engineer)
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_TRANSITION"
+
+
+def test_blank_comment_is_rejected(client, submit, world):
+    request = submit(world.employee)
+    url = f"{API}/requests/{request['id']}/comments"
+    assert client.post(url, json={"body": "   "}, headers=auth(world.employee)).status_code == 422
+
+
+def test_hr_admin_sees_confidential_requests_of_their_own_team(client, submit, world, db):
+    world.employee.manager_id = world.admin.id
+    db.flush()
+    request = submit(world.employee, "hr")
+    assert listed(client, world.admin, "?view=team") == [request["id"]]
+
+
+def test_history_cannot_be_deleted_with_its_request(db, submit, world):
+    request = submit(world.employee)
+    # raises() is outermost so the savepoint is rolled back, not released, after the error.
+    with pytest.raises(IntegrityError), db.begin_nested():
+        db.execute(delete(ServiceRequest).where(ServiceRequest.id == request["id"]))

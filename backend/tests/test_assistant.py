@@ -216,3 +216,11 @@ def test_tool_schemas_stay_small():
     assert '"title"' not in json.dumps(tools.SCHEMAS)
     country = tools.SCHEMAS[0]["function"]["parameters"]["properties"]["country"]
     assert country == {"description": "Country name or two-letter code", "type": "string"}
+
+
+def test_tool_calls_in_one_round_are_capped(ask, model):
+    script, _ = model
+    many = tool_call("count_employees")
+    many["tool_calls"] = [dict(many["tool_calls"][0], id=f"call_{n}") for n in range(10)]
+    script += [many, says("100 employees.")]
+    assert len(ask("Count many times").json()["tools_used"]) == 4

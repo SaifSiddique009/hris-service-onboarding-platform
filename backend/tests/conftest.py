@@ -1,7 +1,7 @@
 import os
 
 os.environ["DATABASE_URL"] = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql://postgres@127.0.0.1:5433/hris_test"
+    "TEST_DATABASE_URL", "postgresql://postgres@localhost:5432/hris_test"
 )
 os.environ["JWT_SECRET"] = "test-secret-that-is-long-enough-for-hs256"
 
