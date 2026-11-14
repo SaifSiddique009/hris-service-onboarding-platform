@@ -657,7 +657,8 @@ Behaviour at the edges:
 - A question the tools cannot answer gets a plain statement of what the assistant can answer, not a guess.
 - Tool arguments that fail validation are returned to the model once as an error so it can correct them; a second failure ends the request with a clear message.
 - At most three tool rounds per question, and list tools return at most 20 rows, so a question cannot run away.
-- An LLM timeout, rate limit or outage returns a friendly error; the rest of the platform is unaffected.
+- The provider limits tokens per minute for each model. The model setting is therefore an ordered list: a rate-limited model hands over to the next one, and the tool schemas are trimmed before sending to keep each call small.
+- An LLM timeout, an outage, or every model being rate limited returns a friendly error; the rest of the platform is unaffected.
 - The UI shows the tools, the filters and the returned rows next to the answer, so the admin can check the wording against the data.
 - Every question is recorded in `ai_query_logs`.
 
