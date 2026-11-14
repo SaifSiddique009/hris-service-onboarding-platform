@@ -1,6 +1,7 @@
 from collections.abc import Iterator
+from datetime import datetime
 
-from sqlalchemy import MetaData, create_engine
+from sqlalchemy import DateTime, MetaData, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
@@ -10,6 +11,8 @@ SessionLocal = sessionmaker(engine, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):
+    # Without this a bare Mapped[datetime] becomes TIMESTAMP WITHOUT TIME ZONE.
+    type_annotation_map = {datetime: DateTime(timezone=True)}
     metadata = MetaData(
         naming_convention={
             "ix": "ix_%(column_0_label)s",
