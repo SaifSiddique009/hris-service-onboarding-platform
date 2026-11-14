@@ -247,7 +247,7 @@ Seeded with Engineering, People & Culture, Finance, Marketing, IT, Operations, C
 | Column | Type | Constraints |
 |---|---|---|
 | email | text | not null, unique, stored lower-case |
-| password_hash | text | not null (bcrypt) |
+| password_hash | text | not null (bcrypt). A password needs 8 to 72 characters with at least one letter and one number |
 | full_name | text | not null |
 | job_title | text | not null |
 | role | `user_role` enum: `EMPLOYEE`, `MANAGER`, `HR_ADMIN` | not null |
@@ -482,6 +482,7 @@ Base path: `/api/v1`. JSON in and out. Authenticated endpoints need `Authorizati
 
 - **Lists** return `{ "items": [...], "total": n, "page": n, "page_size": n }`, written below as `Page<T>`.
 - **Errors** return `{ "error": { "code": "TASK_BLOCKED", "message": "...", "details": {...} } }`.
+- **Text input** is trimmed before validation, so a value made only of spaces counts as empty. Search text is matched literally: `%` and `_` are not wildcards.
 
 | Status | Meaning |
 |---|---|
@@ -658,7 +659,7 @@ What is sent to the model:
 
 Behaviour at the edges:
 
-- A question the tools cannot answer gets a plain statement of what the assistant can answer, not a guess.
+- A question the tools cannot answer gets a plain statement of what the assistant can answer, not a guess. This is enforced on the server: a reply produced without any tool call cannot contain platform data, so it is replaced by a fixed scope message whatever the model wrote.
 - Tool arguments that fail validation are returned to the model once as an error so it can correct them; a second failure ends the request with a clear message.
 - At most three tool rounds per question, at most four tool calls in a round, and at most 20 rows from any tool, so a question cannot run away.
 - The provider limits tokens per minute for each model. The model setting is therefore an ordered list: a rate-limited model hands over to the next one, and the tool schemas are trimmed before sending to keep each call small.

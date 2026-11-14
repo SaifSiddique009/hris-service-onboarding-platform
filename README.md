@@ -61,18 +61,18 @@ Any of the 100 seeded people can sign in the same way: `first.last@northbridge.e
 **AI assistant** (the "Smart Query Assistant" option)
 - The model never writes SQL. It chooses from six typed, read-only queries, the same functions that feed the dashboard, so "open" or "overdue" means the same thing in both places.
 - Only the fields needed are sent to the model. Emails, descriptions and comments never are, and titles of confidential requests are withheld.
-- Questions outside the data are declined. The rows behind every answer are shown next to it.
+- Questions outside the data are declined: a reply that used none of the queries is replaced by a fixed message, so it cannot be led into jokes, code or general chat. The rows behind every answer are shown next to it.
 - It uses Groq's free tier (8,000 tokens per minute and 1,000 requests per day for each model). The backend moves to a second model when the first is rate limited; if both are, it says so and asks you to retry in a minute.
 
 ## Tech stack
 
 | Layer | Choice |
 |---|---|
-| Frontend | React, TypeScript, Vite, Tailwind CSS, TanStack Query, Recharts (hosted on Vercel) |
+| Frontend | React, TypeScript, Vite, Tailwind CSS, TanStack Query, Recharts, Lucide icons (hosted on Vercel) |
 | Backend | FastAPI, SQLAlchemy 2, Alembic, Pydantic v2 (hosted on Render) |
 | Database | PostgreSQL (hosted on Neon) |
 | AI | Groq chat completions with tool calling |
-| Tests | pytest against PostgreSQL: 111 tests |
+| Tests | pytest against PostgreSQL: 130 tests |
 
 The reasons for these choices, the data model, every endpoint, the access rules and both state machines are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
