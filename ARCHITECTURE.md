@@ -100,7 +100,7 @@ What is shared, and therefore exists exactly once:
 - **Reporting line.** Every user row has a `manager_id` column holding the id of that person's manager. A manager's team is every user whose `manager_id` holds that manager's id. Both modules use this one column, so "team" means the same thing for team requests and for direct reports' onboarding.
 - **Departments.** A request category is owned by a department; an onboarding task is owned by a department. Both point at the same `departments` table, and both use the same department head as the default owner.
 - **Access rules.** One permissions module answers "what can this user see?" for both workflows.
-- **Transition handling.** Both state machines are declared as tables of allowed actions and executed by one small helper that checks the action, checks the actor, and records a history row.
+- **Transition handling.** Both state machines are declared as tables of allowed actions. One small helper checks that an action is allowed from the current status and for this actor; each module then applies the change and records its history row in the same transaction.
 - **Read models.** The dashboard and the AI assistant call the same aggregation functions, so both use one definition of terms like "open" and "overdue".
 
 ### 1.3 Code layout
@@ -108,7 +108,8 @@ What is shared, and therefore exists exactly once:
 ```
 backend/
   app/
-    core/          config, database session, security, permissions, state machine helper, errors
+    core/          config, database session, security, auth and role dependencies,
+                   state machine helper, errors
     modules/
       auth/        login, logout, current user
       users/       directory, departments, countries
@@ -124,6 +125,7 @@ frontend/
     api/           typed API client
     features/      one folder per domain, mirroring the backend modules
     components/    shared UI
+    lib/           formatting helpers
 ```
 
 ---
@@ -162,49 +164,49 @@ erDiagram
         text timezone
     }
     departments {
-        bigint id PK
+        integer id PK
         text name UK
-        bigint head_id FK
+        integer head_id FK
     }
     users {
-        bigint id PK
+        integer id PK
         text email UK
         text password_hash
         text full_name
         user_role role
         char2 country_code FK
-        bigint department_id FK
-        bigint manager_id FK
+        integer department_id FK
+        integer manager_id FK
         employment_status status
         date joining_date
     }
     request_categories {
-        bigint id PK
+        integer id PK
         text name UK
-        bigint owning_department_id FK
+        integer owning_department_id FK
         boolean is_confidential
     }
     service_requests {
-        bigint id PK
+        integer id PK
         text title
-        bigint category_id FK
+        integer category_id FK
         request_priority priority
         request_status status
         closure_reason closure_reason
-        bigint requester_id FK
-        bigint assignee_id FK
+        integer requester_id FK
+        integer assignee_id FK
     }
     onboarding_checklists {
-        bigint id PK
-        bigint employee_id FK,UK
-        bigint template_id FK
+        integer id PK
+        integer employee_id FK,UK
+        integer template_id FK
         date start_date
     }
     onboarding_tasks {
-        bigint id PK
-        bigint checklist_id FK
-        bigint assignee_id FK
-        bigint depends_on_task_id FK
+        integer id PK
+        integer checklist_id FK
+        integer assignee_id FK
+        integer depends_on_task_id FK
         date due_date
         task_status status
     }
@@ -214,10 +216,10 @@ erDiagram
 
 Conventions:
 
-- Every table has a `bigint` identity primary key `id`, except `countries`, which is keyed by its ISO code.
+- Every table has an auto-incrementing `integer` primary key `id`, except `countries`, which is keyed by its ISO code.
 - All timestamps are `timestamptz` stored in UTC.
 - Enumerated values are PostgreSQL enum types, so an invalid status cannot be written by any code path.
-- Workflow records are never deleted. Requests, checklists, tasks and their history have no delete endpoint, and their foreign keys use the default `RESTRICT`, so history cannot disappear with its parent. Users and templates are deactivated, not deleted.
+- Workflow records are never deleted. Requests, checklists, tasks and their history have no delete endpoint, and their foreign keys keep PostgreSQL's default behaviour, which refuses to delete a row that others still point to, so history cannot disappear with its parent. Users and templates are deactivated, not deleted.
 
 #### Shared
 
@@ -236,7 +238,7 @@ Seeded with `BD` Bangladesh (`Asia/Dhaka`), `MY` Malaysia (`Asia/Kuala_Lumpur`),
 | Column | Type | Constraints |
 |---|---|---|
 | name | text | not null, unique |
-| head_id | bigint | nullable, FK `users`; the person who receives the department's work by default |
+| head_id | integer | nullable, FK `users`; the person who receives the department's work by default |
 
 Seeded with Engineering, People & Culture, Finance, Marketing, IT, Operations, Compliance.
 
@@ -250,8 +252,8 @@ Seeded with Engineering, People & Culture, Finance, Marketing, IT, Operations, C
 | job_title | text | not null |
 | role | `user_role` enum: `EMPLOYEE`, `MANAGER`, `HR_ADMIN` | not null |
 | country_code | char(2) | not null, FK `countries` |
-| department_id | bigint | not null, FK `departments` |
-| manager_id | bigint | nullable, FK `users`, check `manager_id <> id` |
+| department_id | integer | not null, FK `departments` |
+| manager_id | integer | nullable, FK `users`, check `manager_id <> id` |
 | status | `employment_status` enum: `ACTIVE`, `ON_PROBATION`, `ON_NOTICE` | not null |
 | joining_date | date | not null |
 | is_active | boolean | not null, default true; false blocks login |
@@ -267,9 +269,10 @@ Rules checked when a user is created or changed:
 
 - `manager_id` must point to an active user whose role is `MANAGER` or `HR_ADMIN`, and the reporting line above that manager must not lead back to the user.
 - A user who still has direct reports cannot be moved to the `EMPLOYEE` role.
-- A department head must be an active member of that department with the role `MANAGER` or `HR_ADMIN`.
+- A department head must be an active member of that department with the role `MANAGER` or `HR_ADMIN`. If a head is later moved to another department or to the `EMPLOYEE` role, the department's head is cleared.
+- A user's new manager cannot be someone who is currently handling an open confidential request from that user. The request has to be reassigned first, because an assignee can read it.
 
-**Deactivation always succeeds, at once.** The account can no longer log in and every token already issued stops working. It is never blocked by unfinished work, because cutting someone's access must not wait on housekeeping. Open requests and onboarding tasks stay with the deactivated person; the response reports how many there are, and the dashboard shows the total held by inactive users until HR Admin reassigns them.
+**Deactivation always succeeds, at once.** The account can no longer log in and every token already issued stops working. It is never blocked by unfinished work, because cutting someone's access must not wait on housekeeping. Unresolved requests and incomplete onboarding tasks stay with the deactivated person; the response reports how many there are, and the dashboard shows the total held by inactive users until HR Admin reassigns them.
 
 #### Module A: Service Requests
 
@@ -279,7 +282,7 @@ Rules checked when a user is created or changed:
 |---|---|---|
 | name | text | not null, unique |
 | description | text | not null |
-| owning_department_id | bigint | nullable, FK `departments`; the team that normally resolves this category |
+| owning_department_id | integer | nullable, FK `departments`; the team that normally resolves this category |
 | is_confidential | boolean | not null, default false; see section 4.1 |
 | is_active | boolean | not null, default true |
 
@@ -291,12 +294,12 @@ Seeded with IT Equipment (IT), Software Access (IT), HR Query (People & Culture,
 |---|---|---|
 | title | varchar(200) | not null |
 | description | text | not null |
-| category_id | bigint | not null, FK `request_categories` |
+| category_id | integer | not null, FK `request_categories` |
 | priority | `request_priority` enum: `LOW`, `MEDIUM`, `HIGH`, `URGENT` | not null |
-| status | `request_status` enum: `SUBMITTED`, `ASSIGNED`, `IN_PROGRESS`, `RESOLVED`, `CLOSED` | not null, default `SUBMITTED` |
+| status | `request_status` enum: `SUBMITTED`, `ASSIGNED`, `IN_PROGRESS`, `RESOLVED`, `CLOSED` | not null; set to `SUBMITTED` by the application when the request is created |
 | closure_reason | `closure_reason` enum: `COMPLETED`, `REJECTED`, `WITHDRAWN` | nullable |
-| requester_id | bigint | not null, FK `users` |
-| assignee_id | bigint | nullable, FK `users`; the current assignee |
+| requester_id | integer | not null, FK `users` |
+| assignee_id | integer | nullable, FK `users`; the current assignee |
 | created_at, updated_at | timestamptz | not null |
 | resolved_at, closed_at | timestamptz | nullable |
 
@@ -311,9 +314,9 @@ Indexes: `status`, `requester_id`, `assignee_id`, `category_id`.
 
 | Column | Type | Constraints |
 |---|---|---|
-| request_id | bigint | not null, FK `service_requests` |
-| assignee_id | bigint | not null, FK `users` |
-| assigned_by_id | bigint | not null, FK `users` |
+| request_id | integer | not null, FK `service_requests` |
+| assignee_id | integer | not null, FK `users` |
+| assigned_by_id | integer | not null, FK `users` |
 | note | text | nullable |
 | created_at | timestamptz | not null |
 
@@ -321,10 +324,10 @@ Indexes: `status`, `requester_id`, `assignee_id`, `category_id`.
 
 | Column | Type | Constraints |
 |---|---|---|
-| request_id | bigint | not null, FK `service_requests` |
+| request_id | integer | not null, FK `service_requests` |
 | from_status | `request_status` | nullable (null for the creation event) |
 | to_status | `request_status` | not null |
-| actor_id | bigint | not null, FK `users` |
+| actor_id | integer | not null, FK `users` |
 | note | text | nullable |
 | created_at | timestamptz | not null |
 
@@ -332,8 +335,8 @@ Indexes: `status`, `requester_id`, `assignee_id`, `category_id`.
 
 | Column | Type | Constraints |
 |---|---|---|
-| request_id | bigint | not null, FK `service_requests` |
-| author_id | bigint | not null, FK `users` |
+| request_id | integer | not null, FK `service_requests` |
+| author_id | integer | not null, FK `users` |
 | body | text | not null, 1 to 4000 characters |
 | created_at | timestamptz | not null |
 
@@ -346,21 +349,21 @@ Indexes: `status`, `requester_id`, `assignee_id`, `category_id`.
 | name | text | not null, unique |
 | description | text | not null |
 | is_active | boolean | not null, default true; inactive templates cannot be assigned |
-| created_by_id | bigint | not null, FK `users` |
+| created_by_id | integer | not null, FK `users` |
 | created_at, updated_at | timestamptz | not null |
 
 **`onboarding_template_tasks`**
 
 | Column | Type | Constraints |
 |---|---|---|
-| template_id | bigint | not null, FK `onboarding_templates` |
+| template_id | integer | not null, FK `onboarding_templates` |
 | title | varchar(200) | not null |
 | description | text | not null |
 | owner_kind | `task_owner_kind` enum: `DEPARTMENT`, `LINE_MANAGER` | not null |
-| owner_department_id | bigint | FK `departments`; required when `owner_kind = 'DEPARTMENT'`, null otherwise (check constraint) |
+| owner_department_id | integer | FK `departments`; required when `owner_kind = 'DEPARTMENT'`, null otherwise (check constraint) |
 | deadline_unit | `deadline_unit` enum: `DAY`, `WEEK` | not null |
 | deadline_value | integer | not null, check `>= 1` |
-| depends_on_task_id | bigint | nullable |
+| depends_on_task_id | integer | nullable |
 | sort_order | integer | not null |
 
 Unique `(id, template_id)`, and a composite foreign key `(depends_on_task_id, template_id)` referencing it. The database itself therefore refuses a dependency on a task from another template.
@@ -369,27 +372,28 @@ Unique `(id, template_id)`, and a composite foreign key `(depends_on_task_id, te
 
 | Column | Type | Constraints |
 |---|---|---|
-| employee_id | bigint | not null, FK `users`, unique (one onboarding per employee) |
-| template_id | bigint | not null, FK `onboarding_templates` |
+| employee_id | integer | not null, FK `users`, unique (one onboarding per employee) |
+| template_id | integer | not null, FK `onboarding_templates` |
 | start_date | date | not null; defaults to the employee's joining date |
-| assigned_by_id | bigint | not null, FK `users` |
+| assigned_by_id | integer | not null, FK `users` |
 | created_at | timestamptz | not null |
 
 **`onboarding_tasks`** (a personalised copy of a template task)
 
 | Column | Type | Constraints |
 |---|---|---|
-| checklist_id | bigint | not null, FK `onboarding_checklists` |
-| template_task_id | bigint | nullable, FK `onboarding_template_tasks`, on delete set null |
-| title, description | text | not null; copied from the template task |
+| checklist_id | integer | not null, FK `onboarding_checklists` |
+| template_task_id | integer | nullable, FK `onboarding_template_tasks`, on delete set null |
+| title | varchar(200) | not null; copied from the template task |
+| description | text | not null; copied from the template task |
 | owner_kind | `task_owner_kind` | not null |
-| owner_department_id | bigint | nullable, FK `departments` |
-| assignee_id | bigint | not null, FK `users`; the named person responsible |
+| owner_department_id | integer | nullable, FK `departments` |
+| assignee_id | integer | not null, FK `users`; the named person responsible |
 | due_date | date | not null; calculated at assignment |
-| depends_on_task_id | bigint | nullable |
-| status | `task_status` enum: `NOT_STARTED`, `IN_PROGRESS`, `COMPLETED` | not null, default `NOT_STARTED` |
+| depends_on_task_id | integer | nullable |
+| status | `task_status` enum: `NOT_STARTED`, `IN_PROGRESS`, `COMPLETED` | not null; set to `NOT_STARTED` by the application when the checklist is assigned |
 | started_at, completed_at | timestamptz | nullable |
-| completed_by_id | bigint | nullable, FK `users` |
+| completed_by_id | integer | nullable, FK `users` |
 | sort_order | integer | not null |
 
 Unique `(id, checklist_id)`, and a composite foreign key `(depends_on_task_id, checklist_id)` referencing it, so a task can only depend on a task in the same checklist.
@@ -399,10 +403,10 @@ Indexes: `(assignee_id, status)`, `checklist_id`, `due_date`.
 
 | Column | Type | Constraints |
 |---|---|---|
-| task_id | bigint | not null, FK `onboarding_tasks` |
+| task_id | integer | not null, FK `onboarding_tasks` |
 | from_status | `task_status` | nullable (null for the creation event) |
 | to_status | `task_status` | not null |
-| actor_id | bigint | not null, FK `users` |
+| actor_id | integer | not null, FK `users` |
 | note | text | nullable; set for a reassignment or due-date change, with the old and new value |
 | created_at | timestamptz | not null |
 
@@ -414,7 +418,7 @@ Indexes: `(assignee_id, status)`, `checklist_id`, `due_date`.
 
 | Column | Type | Constraints |
 |---|---|---|
-| user_id | bigint | not null, FK `users` |
+| user_id | integer | not null, FK `users` |
 | question | text | not null |
 | tool_calls | jsonb | not null; tool names and validated arguments, without result rows |
 | answer | text | nullable (null when the call failed) |
@@ -542,7 +546,7 @@ TaskEvent       { from_status, to_status, actor: UserSummary, note, created_at }
 | GET | `/users/lookup` | query: `department_id, search` | `UserSummary[]` | Manager, HR Admin (assignee pickers) |
 | GET | `/users/{id}` | | `User` | HR Admin, the user's manager, or the user |
 | POST | `/users` | `{ full_name, email, password, job_title, role, country, department_id, manager_id, status, joining_date }` | `201 User` | HR Admin |
-| PATCH | `/users/{id}` | any subset of the fields above, plus `is_active` | `User + { open_items }`, the number of open requests and tasks a deactivated user still holds | HR Admin |
+| PATCH | `/users/{id}` | any subset of `full_name, job_title, role, country, department_id, manager_id, status, joining_date, is_active`. Email and password are not editable here | `User + { open_items }`, the number of unresolved requests and incomplete onboarding tasks a deactivated user still holds | HR Admin |
 | GET | `/departments` | | `Department[]` | Any |
 | PATCH | `/departments/{id}` | `{ head_id }` | `Department` | HR Admin |
 | GET | `/countries` | | `Country[]` | Any |
@@ -656,7 +660,7 @@ Behaviour at the edges:
 
 - A question the tools cannot answer gets a plain statement of what the assistant can answer, not a guess.
 - Tool arguments that fail validation are returned to the model once as an error so it can correct them; a second failure ends the request with a clear message.
-- At most three tool rounds per question, and list tools return at most 20 rows, so a question cannot run away.
+- At most three tool rounds per question, at most four tool calls in a round, and at most 20 rows from any tool, so a question cannot run away.
 - The provider limits tokens per minute for each model. The model setting is therefore an ordered list: a rate-limited model hands over to the next one, and the tool schemas are trimmed before sending to keep each call small.
 - An LLM timeout, an outage, or every model being rate limited returns a friendly error; the rest of the platform is unaffected.
 - The UI shows the tools, the filters and the returned rows next to the answer, so the admin can check the wording against the data.
@@ -745,7 +749,7 @@ Other measures: passwords are hashed with bcrypt; tokens are signed with HS256 u
 
 ## 5. State machine design
 
-Both workflows are declared as data: a table of actions, each with the status it starts from, the status it leads to, and the rule for who may take it. One helper executes any action in a single transaction:
+Both workflows are declared as data: a table of actions, each with the status it starts from, the status it leads to, and the rule for who may take it. One shared helper makes the two checks in steps 2 and 3. Each module's service runs every action as a single transaction in this order:
 
 1. Lock what the rule depends on. For a request that is the request row. For an onboarding task it is the parent checklist row, because task rules look at other tasks in the same checklist (section 5.2).
 2. Check the action is allowed from the current status.
@@ -974,11 +978,11 @@ Rules that must hold at all times, and what guarantees each one.
 | A `DEPARTMENT` task names its department; a `LINE_MANAGER` task does not | Check constraint |
 | Every onboarding task has a named owner | `assignee_id` not null, with the fallback in section 2.3 |
 | An employee has at most one onboarding checklist | Unique constraint |
-| Nobody is their own manager, the reporting line never loops, and a manager holds a managing role | Check constraint; validation that walks up the reporting line on user changes |
+| Nobody is their own manager, the reporting line never loops, and a manager holds a managing role | Check constraint; validation that walks up the reporting line on user changes, one change at a time under a lock |
 | Deactivating a user always succeeds and ends their sessions | No precondition on the action; `token_version` is raised in the same transaction |
 | A closed request receives no comments | The check is made while holding the request lock |
 | A user never receives a row outside their scope | One scope function per resource; tests per role on every list and detail endpoint |
-| A confidential request is never shown to the requester's manager, cannot be assigned to them, and its title is never sent to the LLM | Scope function; the assign rule; the AI tools' row builder |
+| A confidential request is never shown to the requester's manager, cannot be assigned to them, and its title is never sent to the LLM | Scope function; the assign rule; the check when a user's manager changes; the AI tools' row builder |
 | History is never lost | No delete endpoints for workflow records; foreign keys restrict deletion |
 
 ---
@@ -1007,15 +1011,15 @@ Rules that must hold at all times, and what guarantees each one.
 
 ## 9. Testing approach
 
-Tests run against PostgreSQL, not an in-memory substitute, because the rules rely on enum types, check constraints, row locks and time zones. Each test runs inside a transaction that is rolled back.
+Tests run against PostgreSQL, not an in-memory substitute, because the rules rely on enum types, check constraints, row locks and time zones. Each test runs inside a transaction that is rolled back, except the two-connection test, which has to commit and cleans up after itself.
 
 | What | How it is tested |
 |---|---|
 | Access scopes | Every list and detail endpoint is called as each role, asserting both what is returned and what is not. A row outside the scope must look exactly like a row that does not exist. |
-| State machines | Each action is tried from every status, by a permitted and a non-permitted actor, asserting success, 409 or 403. |
+| State machines | Each action is tried from statuses where it is allowed and where it is not, by a permitted and a non-permitted actor, asserting success, 409 or 403. |
 | Invariants | Each row of section 7 has at least one test that tries to break it. |
 | Concurrency | The checklist lock is tested with two real database connections acting at the same moment: reopening a task while its dependent is being started. |
-| Dates | Due-date arithmetic and the overdue rule are tested with fixed dates in more than one time zone. |
+| Dates | Due-date arithmetic is tested with fixed dates. The overdue rule is tested with the same due date for two new hires in time zones 26 hours apart, where it must be overdue for one and not for the other. |
 | Seed data | The seed script runs in a test that asserts the required counts and state mix. |
 
 The API runs on an instance that sleeps when idle, so the first request after a quiet period can take up to a minute. Requests wait for it; migrations run on every deploy before the application starts.
