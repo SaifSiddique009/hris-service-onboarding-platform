@@ -151,9 +151,16 @@ def _backdate(db: Session, checklist: OnboardingChecklist, moment) -> None:
     db.refresh(checklist)
     created = moment(checklist.start_date - timedelta(days=4))
     checklist.created_at = created
+    finished = {}
     for task in checklist.tasks:
         started = moment(max(checklist.start_date, task.due_date - timedelta(days=1)))
+        # Work on a task never begins before the task it waits for was completed.
+        waited_for = finished.get(task.depends_on_task_id)
+        if waited_for:
+            started = max(started, waited_for + timedelta(minutes=25))
         completed = max(started, moment(task.due_date)) + timedelta(minutes=40)
+        if task.completed_at:
+            finished[task.id] = completed
         if task.started_at:
             task.started_at = started
         if task.completed_at:
