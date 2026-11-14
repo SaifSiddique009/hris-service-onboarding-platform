@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.errors import register_error_handlers
+from app.modules.assistant.router import router as assistant_router
 from app.modules.auth.router import router as auth_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.onboarding.router import router as onboarding_router
@@ -31,4 +32,5 @@ api.include_router(users_router)
 api.include_router(requests_router)
 api.include_router(onboarding_router)
 api.include_router(dashboard_router)
+api.include_router(assistant_router)
 app.include_router(api)

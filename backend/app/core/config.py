@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     jwt_expires_minutes: int = 480
     cors_origins: str = "http://localhost:5173"
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    # Tried in order; the next one is used when a model is rate limited.
+    groq_model: str = "openai/gpt-oss-120b,openai/gpt-oss-20b"
 
     @property
     def sqlalchemy_url(self) -> str:
