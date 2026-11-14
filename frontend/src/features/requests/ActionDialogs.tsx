@@ -8,7 +8,8 @@ import { ChipGroup } from '../../components/ChipGroup'
 import { Field, SearchInput, Textarea } from '../../components/Fields'
 import { FormDialog as Form } from '../../components/FormDialog'
 import { cn } from '../../lib/cn'
-import { label } from '../../lib/format'
+import { errorText } from '../../lib/format'
+import { toast } from '../../lib/toast'
 import { useCategories, useDepartments } from './queries'
 
 const post = (id: number, path: string, body: object) =>
@@ -23,24 +24,37 @@ interface Props {
 }
 
 const noteRequired: RequestAction[] = ['reject', 'resolve', 'reopen']
+const outcome: Partial<Record<RequestAction, { button: string; done: string }>> = {
+  start: { button: 'Start work', done: 'Work started' },
+  resolve: { button: 'Resolve request', done: 'Request resolved' },
+  reopen: { button: 'Reopen request', done: 'Request reopened' },
+  close: { button: 'Close request', done: 'Request closed' },
+  withdraw: { button: 'Withdraw request', done: 'Request withdrawn' },
+  reject: { button: 'Reject request', done: 'Request rejected' },
+}
 
 function TransitionDialog({ request, action, onClose, onDone, onError }: Props) {
   const [note, setNote] = useState('')
   const required = noteRequired.includes(action)
   const mutation = useMutation({
     mutationFn: () => post(request.id, 'transitions', { action, note: note.trim() || null }),
-    onSuccess: onDone,
+    onSuccess: (updated) => {
+      toast(outcome[action]!.done)
+      onDone(updated)
+    },
     onError,
   })
 
   return (
     <Form
-      title={`${label(action)} request`}
+      title={outcome[action]!.button}
       eyebrow={request.reference}
-      submitLabel={label(action)}
+      submitLabel={outcome[action]!.button}
       onClose={onClose}
       onSubmit={mutation.mutate}
       pending={mutation.isPending}
+      error={mutation.error ? errorText(mutation.error) : undefined}
+      danger={action === 'withdraw' || action === 'reject'}
     >
       <Field label={required ? 'Note' : 'Note (optional)'}>
         <Textarea required={required} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} />
@@ -52,10 +66,12 @@ function TransitionDialog({ request, action, onClose, onDone, onError }: Props) 
 function AssignDialog({ request, action, onClose, onDone, onError }: Props) {
   const { data: departments } = useDepartments()
   const { data: categories } = useCategories()
-  const owner = categories?.find((c) => c.id === request.category.id)?.owning_department?.id
+  const category = categories?.find((c) => c.id === request.category.id)
+  const owner = category?.owning_department
+  const confidential = !!category?.is_confidential && !!owner
   // Until the user picks one, follow the category's owning department once it has loaded.
   const [picked, setDepartment] = useState<string>()
-  const department = picked ?? (owner ? String(owner) : '')
+  const department = confidential ? String(owner.id) : (picked ?? (owner ? String(owner.id) : ''))
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
   const [chosen, setChosen] = useState<UserSummary>()
@@ -78,26 +94,37 @@ function AssignDialog({ request, action, onClose, onDone, onError }: Props) {
 
   const mutation = useMutation({
     mutationFn: () => post(request.id, action, { assignee_id: chosen?.id, note: note.trim() || null }),
-    onSuccess: onDone,
+    onSuccess: (updated) => {
+      toast(`${action === 'assign' ? 'Assigned' : 'Reassigned'} to ${chosen?.full_name}`)
+      onDone(updated)
+    },
     onError,
   })
 
+  const name = action === 'assign' ? 'Assign' : 'Reassign'
+  const candidates = people.data?.filter((u) => u.id !== request.requester.id)
+
   return (
     <Form
-      title={`${label(action)} request`}
+      title={`${name} request`}
       eyebrow={request.reference}
-      submitLabel={chosen ? `${label(action)} to ${chosen.full_name}` : label(action)}
+      submitLabel={chosen ? `${name} to ${chosen.full_name}` : name}
       onClose={onClose}
       onSubmit={mutation.mutate}
       pending={mutation.isPending}
-      disabled={!chosen}
+      disabled={!chosen || chosen.id === request.assignee?.id}
+      error={mutation.error ? errorText(mutation.error) : undefined}
     >
-      <ChipGroup
-        label="Department"
-        value={department}
-        onChange={setDepartment}
-        options={[{ value: '', label: 'Everyone' }, ...(departments ?? []).map((d) => ({ value: String(d.id), label: d.name }))]}
-      />
+      {confidential ? (
+        <p className="text-[13px] text-muted">Confidential requests can only be handled by {owner.name}.</p>
+      ) : (
+        <ChipGroup
+          label="Department"
+          value={department}
+          onChange={setDepartment}
+          options={[{ value: '', label: 'Everyone' }, ...(departments ?? []).map((d) => ({ value: String(d.id), label: d.name }))]}
+        />
+      )}
       <SearchInput placeholder="Search by name" aria-label="Search by name" value={search} onChange={(e) => setSearch(e.target.value)} />
       <div role="radiogroup" aria-label="Assignee" className="max-h-[300px] overflow-y-auto border-t border-ink">
         {people.isPending ? (
@@ -106,29 +133,31 @@ function AssignDialog({ request, action, onClose, onDone, onError }: Props) {
           <p role="alert" className="p-6 text-sm text-danger">
             {people.error.message}
           </p>
-        ) : people.data.length === 0 ? (
+        ) : !candidates || candidates.length === 0 ? (
           <p className="p-6 text-sm text-n-600">No one matches. Try another department or name.</p>
         ) : (
-          people.data.map((u) => {
+          candidates.map((u) => {
             const checked = chosen?.id === u.id
+            const current = request.assignee?.id === u.id
             return (
               <button
                 key={u.id}
                 type="button"
                 role="radio"
                 aria-checked={checked}
+                disabled={current}
                 onClick={() => setChosen(u)}
                 className={cn(
-                  'grid min-h-14 w-full grid-cols-[36px_1fr_auto] items-center gap-3 border-b border-l-[3px] border-b-line border-l-transparent py-2 pl-[11px] pr-3.5 text-left hover:bg-[#f0f2ec]',
+                  'grid min-h-14 w-full grid-cols-[36px_1fr_auto] items-center gap-3 border-b border-l-[3px] border-b-line border-l-transparent py-2 pl-[11px] pr-3.5 text-left hover:bg-[#f0f2ec] disabled:cursor-not-allowed disabled:opacity-60',
                   checked && 'border-l-accent bg-accent-soft',
                 )}
               >
                 <Avatar name={u.full_name} active={checked} />
                 <span className="min-w-0">
-                  <span className="flex items-center gap-2 text-[14.5px] font-semibold">
+                  <span className="flex flex-wrap items-center gap-x-2 text-[14.5px] font-semibold">
                     {u.full_name}
-                    {request.assignee?.id === u.id && (
-                      <span className="rounded-xs border border-control px-1.5 text-[11px] font-bold uppercase">Current</span>
+                    {current && (
+                      <span className="shrink-0 whitespace-nowrap rounded-xs border border-control px-1.5 text-[11px] font-bold uppercase">Current</span>
                     )}
                   </span>
                   <span className="block text-[12.5px] text-muted">
@@ -141,6 +170,9 @@ function AssignDialog({ request, action, onClose, onDone, onError }: Props) {
           })
         )}
       </div>
+      {people.data?.length === 50 && (
+        <p className="text-[13px] text-muted">Showing the first 50 people. Search by name to find others.</p>
+      )}
       <Field label="Note (optional)">
         <Textarea rows={3} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>

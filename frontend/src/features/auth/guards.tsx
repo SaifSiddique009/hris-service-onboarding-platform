@@ -1,4 +1,5 @@
 import { Navigate, Outlet } from 'react-router-dom'
+import { loginPath } from '../../api/client'
 import type { Role } from '../../api/types'
 import { EmptyState, LoadingState } from '../../components/States'
 import { useAuth } from './AuthContext'
@@ -12,7 +13,7 @@ export function RequireAuth() {
       </div>
     )
   }
-  return user ? <Outlet /> : <Navigate to="/login" replace />
+  return user ? <Outlet /> : <Navigate to={loginPath()} replace />
 }
 
 export function RequireRole({ roles }: { roles: Role[] }) {

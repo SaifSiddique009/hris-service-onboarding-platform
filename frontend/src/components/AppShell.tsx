@@ -13,48 +13,67 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
-import type { Role } from '../api/types'
+import { Link, Outlet, useLocation } from 'react-router-dom'
+import type { Role, User } from '../api/types'
 import { useAuth } from '../features/auth/AuthContext'
 import { roleLabel } from '../lib/format'
+import { Avatar } from './Avatar'
 import { RoleBadge } from './Badge'
+import { Brand } from './Brand'
 import { Button } from './Button'
 
-const links: { to: string; label: string; icon: LucideIcon; roles?: Role[] }[] = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['HR_ADMIN'] },
-  { to: '/requests', label: 'Requests', icon: Inbox },
-  { to: '/onboarding/me', label: 'My onboarding', icon: UserCheck },
-  { to: '/onboarding/tasks', label: 'My tasks', icon: ListChecks },
-  { to: '/onboarding', label: 'Team onboarding', icon: Users, roles: ['MANAGER', 'HR_ADMIN'] },
-  { to: '/onboarding/templates', label: 'Templates', icon: FileText, roles: ['HR_ADMIN'] },
-  { to: '/people', label: 'People', icon: IdCard, roles: ['HR_ADMIN'] },
-  { to: '/assistant', label: 'Assistant', icon: Sparkles, roles: ['HR_ADMIN'] },
+const links: { to: string; label: string; icon: LucideIcon; match: RegExp; roles?: Role[] }[] = [
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, match: /^\/dashboard/, roles: ['HR_ADMIN'] },
+  { to: '/requests', label: 'Requests', icon: Inbox, match: /^\/requests/ },
+  { to: '/onboarding/me', label: 'My onboarding', icon: UserCheck, match: /^\/onboarding\/me$/ },
+  { to: '/onboarding/tasks', label: 'My tasks', icon: ListChecks, match: /^\/onboarding\/tasks$/ },
+  {
+    to: '/onboarding',
+    label: 'Team onboarding',
+    icon: Users,
+    match: /^\/onboarding(\/checklists\/.*)?$/,
+    roles: ['MANAGER', 'HR_ADMIN'],
+  },
+  { to: '/onboarding/templates', label: 'Templates', icon: FileText, match: /^\/onboarding\/templates/, roles: ['HR_ADMIN'] },
+  { to: '/people', label: 'People', icon: IdCard, match: /^\/people/, roles: ['HR_ADMIN'] },
+  { to: '/assistant', label: 'Assistant', icon: Sparkles, match: /^\/assistant/, roles: ['HR_ADMIN'] },
 ]
 
-const Brand = () => (
-  <span className="flex items-center gap-2.5">
-    <span className="grid size-[30px] place-items-center rounded-xs bg-ink font-serif text-[17px] text-paper">p.</span>
-    <span className="font-serif text-xl">PeopleDesk</span>
-  </span>
-)
+function AccountLink({ user, onNavigate }: { user: User; onNavigate?: () => void }) {
+  const { pathname } = useLocation()
+  return (
+    <Link
+      to="/account"
+      aria-current={pathname === '/account' ? 'page' : undefined}
+      onClick={onNavigate}
+      className="group mt-auto flex items-center gap-2.5 border-t border-line px-[9px] pb-1 pt-4 text-ink no-underline hover:text-ink"
+    >
+      <Avatar name={user.full_name} active />
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-semibold group-hover:underline group-aria-[current=page]:underline">{user.full_name}</span>
+        <span className="block truncate text-xs text-muted">{user.job_title}</span>
+      </span>
+    </Link>
+  )
+}
 
 function Nav({ role, onNavigate }: { role: Role; onNavigate?: () => void }) {
+  const { pathname } = useLocation()
   return (
     <nav aria-label="Main" className="flex flex-col gap-0.5">
       {links
         .filter((link) => !link.roles || link.roles.includes(role))
-        .map(({ to, label, icon: Icon }) => (
-          <NavLink
+        .map(({ to, label, icon: Icon, match }) => (
+          <Link
             key={to}
             to={to}
-            // Only "Team onboarding" needs an exact match: its child pages have their own items.
-            end={to === '/onboarding'}
+            aria-current={match.test(pathname) ? 'page' : undefined}
             onClick={onNavigate}
             className="flex min-h-[38px] items-center gap-[11px] rounded-xs border-l-3 border-transparent pl-[9px] pr-3 text-sm font-medium text-n-600 no-underline hover:bg-[#e4e9df] hover:text-n-600 aria-[current=page]:border-accent aria-[current=page]:font-semibold aria-[current=page]:text-ink max-md:min-h-11"
           >
             <Icon aria-hidden size={16} strokeWidth={1.8} />
             {label}
-          </NavLink>
+          </Link>
         ))}
     </nav>
   )
@@ -72,23 +91,24 @@ export function AppShell() {
           <Brand />
         </div>
         <Nav role={user.role} />
-        <p className="mt-auto pl-[9px] text-xs leading-relaxed text-muted">
-          Northbridge
-          <br />
-          Dhaka · Kuala Lumpur · Colombo · Limassol
-        </p>
+        <AccountLink user={user} />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-(--header-h) items-center gap-3 border-b border-line bg-page/95 px-14 backdrop-blur max-md:px-1">
+        <header className="sticky top-0 z-20 flex h-(--header-h) items-center gap-3 border-b border-line bg-page/95 px-14 backdrop-blur max-md:gap-1 max-md:px-1">
           <Button variant="ghost" size="icon" aria-label="Open menu" className="md:hidden" onClick={() => setOpen(true)}>
             <Menu aria-hidden size={18} strokeWidth={1.8} />
           </Button>
-          <span className="md:hidden">
+          <span className="min-w-0 md:hidden">
             <Brand />
           </span>
-          <span className="ml-auto hidden text-sm font-medium md:inline">{user.full_name}</span>
-          <span className="max-md:ml-auto">
+          <Link
+            to="/account"
+            className="ml-auto hidden rounded-xs text-sm font-medium text-ink no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus md:inline"
+          >
+            {user.full_name}
+          </Link>
+          <span className="shrink-0 max-md:ml-auto">
             <RoleBadge>{roleLabel(user.role)}</RoleBadge>
           </span>
           <Button variant="ghost" onClick={logout} aria-label="Log out">
@@ -119,7 +139,7 @@ export function AppShell() {
               </Button>
             </div>
             <Nav role={user.role} onNavigate={() => setOpen(false)} />
-            <p className="mt-auto pl-[9px] text-[13px] text-muted">{user.full_name}</p>
+            <AccountLink user={user} onNavigate={() => setOpen(false)} />
           </div>
         </div>
       )}

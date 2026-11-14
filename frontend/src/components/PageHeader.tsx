@@ -27,7 +27,7 @@ export function PageHeader({ title, eyebrow, subtitle, actions, back }: Props) {
       <div className="flex flex-wrap items-end justify-between gap-5">
         <div className="min-w-0">
           {eyebrow && <p className={eyebrowClass}>{eyebrow}</p>}
-          <h1 className="text-balance font-serif text-[46px] font-normal leading-[1.05] tracking-[-0.02em] max-md:text-[32px]">
+          <h1 title={title} className="line-clamp-2 pb-1 text-balance font-serif text-[46px] font-normal leading-[1.05] tracking-[-0.02em] max-md:text-[32px]">
             {title}
           </h1>
           {subtitle && <p className="mt-3 max-w-[820px] text-base leading-[1.55] text-n-600">{subtitle}</p>}

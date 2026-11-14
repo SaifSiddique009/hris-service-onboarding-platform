@@ -22,6 +22,13 @@ export interface User extends UserSummary {
   is_active: boolean
 }
 
+export interface LoginResponse {
+  access_token: string
+  token_type: string
+  expires_in: number
+  user: User
+}
+
 export interface Page<T> {
   items: T[]
   total: number
@@ -74,6 +81,7 @@ export interface StatusEvent {
   from_status: RequestStatus | null
   to_status: RequestStatus
   actor: UserSummary
+  assignee: UserSummary | null
   note: string | null
   created_at: string
 }
@@ -231,10 +239,11 @@ export interface UserWrite {
   joining_date: string
 }
 
-export type UserUpdate = Partial<Omit<UserWrite, 'email' | 'password' | 'full_name'>> & { is_active?: boolean }
+export type UserUpdate = Partial<Omit<UserWrite, 'email' | 'password'>> & { is_active?: boolean }
 
 export interface UserUpdated extends User {
   open_items: number
+  direct_reports: number
 }
 
 export interface Group {
@@ -281,8 +290,11 @@ export interface InsightsReport {
 
 export interface ToolUse {
   name: string
+  label: string
   arguments: Record<string, unknown>
   row_count: number
+  total: number
+  truncated: boolean
   rows: Record<string, unknown>[]
 }
 

@@ -1,32 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { CornerUpLeft, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { DeadlineUnit, TaskOwnerKind, TemplateDetail, TemplateTask, TemplateTaskInput } from '../../api/types'
 import { Button } from '../../components/Button'
-import { Card } from '../../components/Card'
 import { ChipGroup } from '../../components/ChipGroup'
 import { Field, Input, Select, Textarea } from '../../components/Fields'
 import { FormDialog } from '../../components/FormDialog'
-import { Modal } from '../../components/Modal'
 import { PageHeader } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { EmptyState } from '../../components/States'
 import { errorText } from '../../lib/format'
+import { useOnce } from '../../lib/once'
+import { toast } from '../../lib/toast'
 import { useDepartments } from '../requests/queries'
 import { ChoiceField } from './ChoiceField'
-import { ActiveBadge } from './TemplatesPage'
 
 const json = (method: string, body?: object) => ({ method, body: body && JSON.stringify(body) })
 
-function useTemplateMutation<V = void>(id: number, fn: (v: V) => Promise<unknown>, onSuccess?: () => void) {
+function useTemplateMutation<V = void>(id: number, fn: (v: V) => Promise<unknown>, message: string, onSuccess?: () => void) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: fn,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['onboarding', 'template', id] })
       queryClient.invalidateQueries({ queryKey: ['onboarding', 'templates'] })
+      toast(message)
       onSuccess?.()
     },
   })
@@ -35,46 +35,80 @@ function useTemplateMutation<V = void>(id: number, fn: (v: V) => Promise<unknown
 function TemplateForm({ template }: { template: TemplateDetail }) {
   const [name, setName] = useState(template.name)
   const [description, setDescription] = useState(template.description)
-  const save = useTemplateMutation(template.id, (body: object) =>
-    api(`/onboarding/templates/${template.id}`, json('PATCH', body)),
+  const once = useOnce()
+  const save = useTemplateMutation(
+    template.id,
+    (body: object) => api(`/onboarding/templates/${template.id}`, json('PATCH', body)),
+    'Changes saved',
   )
 
   return (
-    <Card>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          save.mutate({ name: name.trim(), description: description.trim() })
-        }}
-        className="flex max-w-2xl flex-col gap-4"
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!save.isPending) once(() => save.mutate({ name: name.trim(), description: description.trim() }))
+      }}
+      className="mb-14 flex max-w-2xl flex-col gap-4"
+    >
+      <Field label="Name">
+        <Input required minLength={3} maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <Field label="Description">
+        <Textarea rows={3} required minLength={3} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </Field>
+      {save.isError && (
+        <p role="alert" className="text-[13px] font-medium text-danger">
+          {errorText(save.error)}
+        </p>
+      )}
+      <div>
+        <Button type="submit" variant="secondary" loading={save.isPending}>
+          Save changes
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function ActiveSwitch({ template }: { template: TemplateDetail }) {
+  const toggle = useTemplateMutation(
+    template.id,
+    () => api(`/onboarding/templates/${template.id}`, json('PATCH', { is_active: !template.is_active })),
+    template.is_active ? 'Template deactivated' : 'Template activated',
+  )
+  const on = template.is_active
+
+  return (
+    <div className="mb-8 flex items-start gap-3 border-t border-line py-4">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-labelledby="active-label"
+        aria-describedby="active-help"
+        disabled={toggle.isPending}
+        onClick={() => toggle.mutate()}
+        className={`relative mt-0.5 h-6 w-10 shrink-0 rounded-xl transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60 ${on ? 'bg-accent' : 'bg-n-400'}`}
       >
-        <Field label="Name">
-          <Input required minLength={3} maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label="Description">
-          <Textarea rows={3} required minLength={3} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} />
-        </Field>
-        {save.isError && (
-          <p role="alert" className="text-[13px] font-medium text-danger">
-            {errorText(save.error)}
+        <span
+          aria-hidden
+          className={`absolute left-[3px] top-[3px] size-[18px] rounded-full bg-paper shadow-sm transition-transform duration-200 ${on ? 'translate-x-4' : ''}`}
+        />
+      </button>
+      <div className="min-w-0 text-sm">
+        <p id="active-label" className="font-semibold">
+          Active
+        </p>
+        <p id="active-help" className="text-muted">
+          When off, this template can no longer be assigned to a new hire. Existing checklists are not changed.
+        </p>
+        {toggle.isError && (
+          <p role="alert" className="mt-1 text-[13px] font-medium text-danger">
+            {errorText(toggle.error)}
           </p>
         )}
-        <div className="flex flex-wrap items-center gap-2">
-          <Button type="submit" loading={save.isPending}>
-            Save changes
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={save.isPending}
-            onClick={() => save.mutate({ is_active: !template.is_active })}
-          >
-            {template.is_active ? 'Deactivate' : 'Activate'}
-          </Button>
-          <ActiveBadge active={template.is_active} />
-        </div>
-      </form>
-    </Card>
+      </div>
+    </div>
   )
 }
 
@@ -103,6 +137,7 @@ function TaskDialog({ template, task, onClose }: { template: TemplateDetail; tas
       const base = `/onboarding/templates/${template.id}/tasks`
       return task ? api(`${base}/${task.id}`, json('PATCH', body)) : api(base, json('POST', body))
     },
+    task ? 'Changes saved' : 'Task added',
     onClose,
   )
 
@@ -181,31 +216,22 @@ function DeleteDialog({ template, task, onClose }: { template: TemplateDetail; t
   const remove = useTemplateMutation(
     template.id,
     () => api(`/onboarding/templates/${template.id}/tasks/${task.id}`, json('DELETE')),
+    'Task deleted',
     onClose,
   )
   return (
-    <Modal
+    <FormDialog
       title="Delete task"
       eyebrow="Template"
+      submitLabel="Delete"
+      danger
       onClose={onClose}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="danger" loading={remove.isPending} onClick={() => remove.mutate()}>
-            Delete
-          </Button>
-        </>
-      }
+      pending={remove.isPending}
+      error={remove.error?.message}
+      onSubmit={remove.mutate}
     >
       <p className="text-sm text-n-600">Delete "{task.title}" from this template? Existing checklists are not changed.</p>
-      {remove.isError && (
-        <p role="alert" className="mt-3 text-[13px] font-medium text-danger">
-          {remove.error.message}
-        </p>
-      )}
-    </Modal>
+    </FormDialog>
   )
 }
 
@@ -215,7 +241,7 @@ function TaskList({ template }: { template: TemplateDetail }) {
   const titleOf = (id: number) => template.tasks.find((t) => t.id === id)?.title
 
   return (
-    <section className="mt-14">
+    <section>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-t border-ink pt-4">
         <h2 className="font-serif text-[28px] leading-[1.2]">Tasks</h2>
         <Button onClick={() => setEditing('new')}>
@@ -226,46 +252,59 @@ function TaskList({ template }: { template: TemplateDetail }) {
       {template.tasks.length === 0 ? (
         <EmptyState title="This template has no tasks yet" help="Add the first task a new hire should complete." />
       ) : (
-        <ol className="border-t border-line">
-          {template.tasks.map((t, i) => (
-            <li
-              key={t.id}
-              className="grid grid-cols-[44px_1fr] gap-4 border-b border-line py-6 pl-3.5 pr-5 max-md:grid-cols-[28px_1fr] max-md:gap-2.5 max-md:pr-3"
-            >
-              <span className="font-serif text-xl tabular-nums text-muted">{String(i + 1).padStart(2, '0')}</span>
-              <div className="min-w-0">
-                <h3 className="text-[15.5px] font-semibold">{t.title}</h3>
-                <p className="mt-1 text-[13.5px] text-muted">{t.description}</p>
-                <dl className="mt-3 flex flex-wrap gap-x-7 gap-y-1.5 text-[13px]">
-                  <div className="flex gap-1.5">
-                    <dt className="text-muted">Owner</dt>
-                    <dd>{t.owner_department?.name ?? 'Line manager'}</dd>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <dt className="text-muted">Due</dt>
-                    <dd>{t.deadline_label}</dd>
-                  </div>
+        <div className="border-t border-ink">
+          <div className="grid grid-cols-[44px_minmax(0,1fr)_150px_110px_88px] gap-5 border-b border-control py-3 text-[11.5px] font-semibold uppercase tracking-[.06em] text-muted max-md:hidden">
+            <span>#</span>
+            <span>Task</span>
+            <span>Owner</span>
+            <span>Deadline</span>
+            <span />
+          </div>
+          <ol>
+            {template.tasks.map((t, i) => (
+              <li
+                key={t.id}
+                className="grid grid-cols-[44px_minmax(0,1fr)_150px_110px_88px] items-start gap-5 border-b border-line py-[18px] max-md:grid-cols-[28px_minmax(0,1fr)] max-md:gap-x-2.5 max-md:gap-y-1.5"
+              >
+                <span className="font-serif text-lg tabular-nums text-muted">{String(i + 1).padStart(2, '0')}</span>
+                <div className="min-w-0">
+                  <h3 className="text-[15px] font-semibold">{t.title}</h3>
+                  <p className="mt-0.5 text-[13px] text-muted">{t.description}</p>
                   {t.depends_on_task_id && (
-                    <div className="flex gap-1.5">
-                      <dt className="text-muted">Waits for</dt>
-                      <dd>{titleOf(t.depends_on_task_id)}</dd>
-                    </div>
+                    <p className="mt-2 inline-flex items-center gap-1.5 text-[13px] text-plum">
+                      <CornerUpLeft aria-hidden size={14} strokeWidth={1.8} />
+                      <span>
+                        Waits for <strong>{titleOf(t.depends_on_task_id)}</strong>
+                      </span>
+                    </p>
                   )}
-                </dl>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => setEditing(t)}>
-                    <Pencil aria-hidden size={16} strokeWidth={1.8} />
-                    Edit
-                  </Button>
-                  <Button size="sm" variant="danger" onClick={() => setDeleting(t)}>
-                    <Trash2 aria-hidden size={16} strokeWidth={1.8} />
-                    Delete
-                  </Button>
                 </div>
-              </div>
-            </li>
-          ))}
-        </ol>
+                <span className="text-sm max-md:col-start-2">
+                  <span className="text-muted md:hidden">Owner: </span>
+                  {t.owner_department?.name ?? 'Line manager'}
+                </span>
+                <span className="text-sm font-semibold max-md:col-start-2">
+                  <span className="font-normal text-muted md:hidden">Due: </span>
+                  {t.deadline_label}
+                </span>
+                <span className="flex justify-end gap-0.5 max-md:col-start-2 max-md:justify-start">
+                  <Button size="icon" variant="ghost" aria-label={`Edit ${t.title}`} onClick={() => setEditing(t)}>
+                    <Pencil aria-hidden size={16} strokeWidth={1.8} />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label={`Delete ${t.title}`}
+                    className="text-n-500 hover:bg-danger-soft hover:text-danger"
+                    onClick={() => setDeleting(t)}
+                  >
+                    <Trash2 aria-hidden size={16} strokeWidth={1.8} />
+                  </Button>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
       )}
       {editing && (
         <TaskDialog template={template} task={editing === 'new' ? undefined : editing} onClose={() => setEditing(undefined)} />
@@ -288,6 +327,7 @@ export function TemplateDetailPage() {
       <QueryBoundary query={query}>
         {(t) => (
           <>
+            <ActiveSwitch template={t} />
             <TemplateForm key={t.updated_at} template={t} />
             <TaskList template={t} />
           </>

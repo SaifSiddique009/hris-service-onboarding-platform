@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Pencil, Plus } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Plus } from 'lucide-react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { Page, User, UserUpdated } from '../../api/types'
@@ -13,21 +13,38 @@ import { PageHeader } from '../../components/PageHeader'
 import { StatusBadge } from '../../components/RequestBadges'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { Table, Td, Th } from '../../components/Table'
-import { employmentStatuses, formatDay, label, roleLabel, roles } from '../../lib/format'
+import { employmentStatuses, label, plural, roleLabel, roles } from '../../lib/format'
 import { useCountries, useDepartments } from '../requests/queries'
 import { UserDialog } from './UserDialog'
 
 const PAGE_SIZE = 20
-const filterKeys = ['country', 'department_id', 'role', 'status', 'search']
-const headings = ['Name', 'Department', 'Country', 'Role', 'Status', 'Manager', 'Joined', '']
+const filterKeys = ['country', 'department_id', 'role', 'status', 'is_active', 'search']
+const headings = ['Name', 'Job title', 'Department', 'Country', 'Role', 'Status']
 
 const Who = ({ u }: { u: User }) => (
   <div className="flex items-center gap-3">
     <Avatar name={u.full_name} active={u.is_active} />
     <div className="min-w-0">
       <p className="font-semibold">{u.full_name}</p>
-      <p className="text-[13px] text-muted">{u.job_title}</p>
+      <p className="text-[13px] text-muted [overflow-wrap:anywhere]">{u.email.split('@')[0]}<wbr />@{u.email.split('@')[1]}</p>
     </div>
+  </div>
+)
+
+const rowProps = (open: () => void) => ({
+  tabIndex: 0,
+  onClick: open,
+  onKeyDown: (e: KeyboardEvent<HTMLElement>) => {
+    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+    e.preventDefault()
+    open()
+  },
+})
+
+const Status = ({ u }: { u: User }) => (
+  <div className="flex flex-wrap items-center gap-2">
+    <span>{label(u.status)}</span>
+    {!u.is_active && <StatusBadge status="INACTIVE">Sign-in disabled</StatusBadge>}
   </div>
 )
 
@@ -35,7 +52,7 @@ export function PeoplePage() {
   const [params, setParams] = useSearchParams()
   const [search, setSearch] = useState(params.get('search') ?? '')
   const [dialog, setDialog] = useState<{ user?: User } | null>(null)
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState<string[]>([])
   const departments = useDepartments()
   const countries = useCountries(true)
   const page = Number(params.get('page')) || 1
@@ -67,10 +84,17 @@ export function PeoplePage() {
 
   function saved(u: UserUpdated) {
     setDialog(null)
+    const open = u.open_items > 0
+    const reports = u.direct_reports > 0
     setNotice(
-      !u.is_active && u.open_items > 0
-        ? `Deactivated. ${u.open_items} open requests or onboarding tasks are still assigned to this person and need reassigning.`
-        : '',
+      u.is_active || (!open && !reports)
+        ? []
+        : [
+            open
+              ? `Sign-in disabled. ${plural(u.open_items, 'open request', 'open requests')} or onboarding ${u.open_items === 1 ? 'task is' : 'tasks are'} still assigned to this person.`
+              : 'Sign-in disabled.',
+            ...(reports ? [`${plural(u.direct_reports, 'person', 'people')} still ${u.direct_reports === 1 ? 'reports' : 'report'} to this person; give them a new manager.`] : []),
+          ],
     )
   }
 
@@ -100,10 +124,14 @@ export function PeoplePage() {
         }
       />
 
-      {notice && (
+      {notice.length > 0 && (
         <div role="status" className="mb-5 flex items-start justify-between gap-3 rounded-md border border-amber/30 bg-amber-soft px-4 py-3 text-sm text-amber">
-          <p>{notice}</p>
-          <button onClick={() => setNotice('')} className="min-h-6 font-semibold underline max-md:min-h-11">
+          <div className="space-y-1">
+            {notice.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </div>
+          <button onClick={() => setNotice([])} className="min-h-6 font-semibold underline max-md:min-h-11">
             Dismiss
           </button>
         </div>
@@ -122,6 +150,11 @@ export function PeoplePage() {
         {filter('department_id', 'Department', (departments.data ?? []).map((d) => ({ value: String(d.id), label: d.name })))}
         {filter('role', 'Role', roles.map((r) => ({ value: r, label: roleLabel(r) })))}
         {filter('status', 'Status', employmentStatuses.map((s) => ({ value: s, label: label(s) })))}
+        {filter('is_active', 'Account', [
+          { value: 'true', label: 'Enabled' },
+          { value: 'false', label: 'Disabled' },
+        ])}
+        {data && <span className="ml-auto text-[13px] tabular-nums text-muted">{plural(data.total, 'person', 'people')}</span>}
       </div>
 
       {list.isPending ? (
@@ -142,28 +175,25 @@ export function PeoplePage() {
         <>
           <ul className="border-t border-ink md:hidden">
             {data.items.map((u) => (
-              <li key={u.id} className="flex flex-col gap-2 border-b border-line py-4">
-                <div className="flex items-start justify-between gap-2">
-                  <Who u={u} />
-                  <Button variant="ghost" size="sm" aria-label={`Edit ${u.full_name}`} onClick={() => setDialog({ user: u })}>
-                    <Pencil aria-hidden size={16} strokeWidth={1.8} />
-                    Edit
-                  </Button>
-                </div>
+              <li
+                key={u.id}
+                {...rowProps(() => setDialog({ user: u }))}
+                className="flex cursor-pointer flex-col gap-2 border-b border-line py-4 hover:bg-n-100"
+              >
+                <Who u={u} />
+                <p className="text-[13px] text-muted">{u.job_title}</p>
                 <div className="flex flex-wrap items-center gap-2">
                   <RoleBadge>{roleLabel(u.role)}</RoleBadge>
-                  <span className="text-[13px]">{label(u.status)}</span>
-                  {!u.is_active && <StatusBadge status="INACTIVE">Inactive</StatusBadge>}
+                  <Status u={u} />
                 </div>
                 <p className="text-[13px] text-muted">
-                  {u.department.name} · {u.country.name} · Joined {formatDay(u.joining_date)}
+                  {u.department.name} · {u.country.name}
                 </p>
-                <p className="text-[13px] text-muted">Manager: {u.manager?.full_name ?? 'None'}</p>
               </li>
             ))}
           </ul>
 
-          <div className="hidden overflow-x-auto md:block">
+          <div className="hidden md:block">
             <Table>
               <thead>
                 <tr>
@@ -174,28 +204,18 @@ export function PeoplePage() {
               </thead>
               <tbody>
                 {data.items.map((u) => (
-                  <tr key={u.id}>
+                  <tr key={u.id} {...rowProps(() => setDialog({ user: u }))} className="cursor-pointer hover:bg-n-100">
                     <Td>
                       <Who u={u} />
                     </Td>
+                    <Td>{u.job_title}</Td>
                     <Td>{u.department.name}</Td>
                     <Td>{u.country.name}</Td>
                     <Td>
                       <RoleBadge>{roleLabel(u.role)}</RoleBadge>
                     </Td>
                     <Td>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span>{label(u.status)}</span>
-                        {!u.is_active && <StatusBadge status="INACTIVE">Inactive</StatusBadge>}
-                      </div>
-                    </Td>
-                    <Td>{u.manager?.full_name ?? <span className="italic text-muted">None</span>}</Td>
-                    <Td className="whitespace-nowrap tabular-nums">{formatDay(u.joining_date)}</Td>
-                    <Td className="text-right">
-                      <Button variant="ghost" size="sm" aria-label={`Edit ${u.full_name}`} onClick={() => setDialog({ user: u })}>
-                        <Pencil aria-hidden size={16} strokeWidth={1.8} />
-                        Edit
-                      </Button>
+                      <Status u={u} />
                     </Td>
                   </tr>
                 ))}
@@ -205,7 +225,7 @@ export function PeoplePage() {
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-[13px] text-muted">
             <span className="tabular-nums">
-              Page {data.page} of {pages} · {data.total} people
+              Page {data.page} of {pages}
             </span>
             <div className="flex gap-2">
               <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>

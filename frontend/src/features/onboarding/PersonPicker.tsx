@@ -29,7 +29,7 @@ export function PersonPicker<T extends UserSummary>({ scope, fetchPeople, select
       <Field label="Search by name">
         <SearchInput placeholder="Search by name" value={search} onChange={(e) => setSearch(e.target.value)} />
       </Field>
-      <div role="radiogroup" aria-label="People" className="max-h-[300px] overflow-y-auto border-t border-ink">
+      <div role="radiogroup" aria-label="People" className="relative max-h-[300px] overflow-y-auto border-t border-ink">
         {people.isPending ? (
           <p className="p-4 text-sm text-n-600">Loading people…</p>
         ) : people.isError ? (

@@ -6,7 +6,8 @@ import { PageHeader } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { EmptyState } from '../../components/States'
 import { Tabs } from '../../components/Tabs'
-import { TaskCard } from './TaskCard'
+import { useAuth } from '../auth/AuthContext'
+import { TaskRow } from './TaskRow'
 
 const tabs = [
   { state: 'open', text: 'Open', empty: 'You have no open onboarding tasks.' },
@@ -16,12 +17,20 @@ const tabs = [
 ]
 
 export function MyTasksPage() {
+  const { user } = useAuth()
   const [params, setParams] = useSearchParams()
   const tab = tabs.find((t) => t.state === params.get('state')) ?? tabs[0]
   const query = useQuery({
-    queryKey: ['onboarding', 'tasks', tab.state],
-    queryFn: () => api<OnboardingTask[]>(`/onboarding/tasks/mine?state=${tab.state}`),
+    queryKey: ['onboarding', 'tasks', 'mine'],
+    queryFn: () => api<OnboardingTask[]>('/onboarding/tasks/mine'),
   })
+  const matches: Record<string, (t: OnboardingTask) => boolean> = {
+    open: (t) => t.effective_status !== 'COMPLETED' && t.effective_status !== 'BLOCKED',
+    overdue: (t) => t.is_overdue,
+    blocked: (t) => t.effective_status === 'BLOCKED',
+    completed: (t) => t.effective_status === 'COMPLETED',
+  }
+  const count = (state: string) => query.data?.filter(matches[state]).length
 
   return (
     <>
@@ -33,17 +42,18 @@ export function MyTasksPage() {
         tabs={tabs.map((t) => ({
           value: t.state,
           label: t.text,
-          count: t === tab ? query.data?.length : undefined,
+          count: count(t.state),
           hot: t.state === 'overdue' || t.state === 'blocked',
         }))}
       />
       <div className="mt-6">
         <QueryBoundary query={query}>
-          {(tasks) =>
-            tasks.length === 0 ? (
+          {(all) => {
+            const tasks = all.filter(matches[tab.state])
+            return tasks.length === 0 ? (
               <EmptyState
                 title={tab.empty}
-                help="Tasks appear here when a checklist assigns them to you."
+                help="These are tasks you do for a new hire. The tasks of your own onboarding are under My onboarding."
                 action={
                   tab.state !== 'open' && (
                     <Link to="?state=open" className="text-sm font-semibold">
@@ -55,11 +65,11 @@ export function MyTasksPage() {
             ) : (
               <ul className="border-t border-ink">
                 {tasks.map((t) => (
-                  <TaskCard key={t.id} task={t} showEmployee />
+                  <TaskRow key={t.id} task={t} canOpen={user?.role !== 'EMPLOYEE'} />
                 ))}
               </ul>
             )
-          }
+          }}
         </QueryBoundary>
       </div>
     </>

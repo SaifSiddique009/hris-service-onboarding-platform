@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api } from '../../api/client'
+import { ApiError, api } from '../../api/client'
 import type { Page, RequestSummary, Role } from '../../api/types'
 import { Button } from '../../components/Button'
 import { SearchInput } from '../../components/Fields'
@@ -12,9 +12,10 @@ import { PriorityBadge, StatusBadge } from '../../components/RequestBadges'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { RowLink, Table, Td, Th } from '../../components/Table'
 import { Tabs } from '../../components/Tabs'
-import { formatDate, label, priorities, statuses } from '../../lib/format'
+import { formatDate, label, plural, priorities, statuses } from '../../lib/format'
 import { useAuth } from '../auth/AuthContext'
 import { useCategories, useCountries } from './queries'
+import { statusText } from './status'
 
 const PAGE_SIZE = 20
 const mine = { view: 'mine', text: 'My requests' }
@@ -26,6 +27,15 @@ const tabsByRole: Record<Role, { view: string; text: string }[]> = {
   EMPLOYEE: [mine, assigned],
   MANAGER: [mine, assigned, team, queue],
   HR_ADMIN: [{ view: 'all', text: 'All requests' }, mine, assigned, team, queue],
+}
+
+const defaultView: Record<Role, string> = { EMPLOYEE: 'mine', MANAGER: 'team', HR_ADMIN: 'all' }
+const emptyByView: Record<string, string> = {
+  mine: 'You have not raised any requests yet.',
+  assigned: 'Nothing is assigned to you.',
+  team: 'Your team has no requests.',
+  queue: "Your department's queue is empty.",
+  all: 'There are no requests yet.',
 }
 
 const filterKeys = ['status', 'category_id', 'priority', 'country', 'search']
@@ -41,11 +51,16 @@ export function RequestsPage() {
   const countries = useCountries(isAdmin)
 
   const tabs = tabsByRole[user?.role ?? 'EMPLOYEE']
-  const view = tabs.find((t) => t.view === params.get('view'))?.view ?? tabs[0].view
+  const role = user?.role ?? 'EMPLOYEE'
+  const view = tabs.find((t) => t.view === params.get('view'))?.view ?? defaultView[role]
   const page = Number(params.get('page')) || 1
 
   const query = new URLSearchParams({ view, page: String(page), page_size: String(PAGE_SIZE) })
-  for (const key of filterKeys) if (params.get(key)) query.set(key, params.get(key)!)
+  for (const key of filterKeys) {
+    const value = params.get(key)?.trim()
+    if (value) query.set(key, value)
+  }
+  const filtered = filterKeys.some((key) => params.get(key)?.trim())
 
   const list = useQuery({
     queryKey: ['requests', query.toString()],
@@ -64,8 +79,8 @@ export function RequestsPage() {
   }
 
   useEffect(() => {
-    if (search === (params.get('search') ?? '')) return
-    const id = setTimeout(() => update({ search }), 300)
+    if (search.trim() === (params.get('search') ?? '')) return
+    const id = setTimeout(() => update({ search: search.trim() }), 300)
     return () => clearTimeout(id)
   })
 
@@ -117,9 +132,46 @@ export function RequestsPage() {
       {list.isPending ? (
         <LoadingState />
       ) : list.isError || !data ? (
-        <ErrorState message={list.error?.message ?? 'Something went wrong'} onRetry={() => list.refetch()} />
+        <ErrorState
+          message={list.error?.message ?? 'Something went wrong'}
+          status={list.error instanceof ApiError ? list.error.status : undefined}
+          onRetry={() => list.refetch()}
+          action={
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setSearch('')
+                setParams(new URLSearchParams())
+              }}
+            >
+              {filtered ? 'Clear filters' : 'Go to the first page'}
+            </Button>
+          }
+        />
+      ) : data.items.length === 0 && data.total > 0 ? (
+        <EmptyState
+          title={`There is no page ${page}.`}
+          action={<Button onClick={() => update({ page: '' })}>Go to the first page</Button>}
+        />
       ) : data.items.length === 0 ? (
-        <EmptyState title="No requests match" help="Try clearing a filter or switching to another view." action={newRequest} />
+        filtered ? (
+          <EmptyState
+            title="No requests match these filters."
+            action={
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setSearch('')
+                  setParams(new URLSearchParams(view === defaultView[role] ? {} : { view }))
+                }}
+              >
+                Clear filters
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState title={emptyByView[view]} action={view === 'mine' ? newRequest : undefined} />
+        )
       ) : (
         <>
           <ul className="border-t border-ink md:hidden">
@@ -135,9 +187,11 @@ export function RequestsPage() {
                       <span className="font-semibold tabular-nums">{r.reference}</span> ·{' '}
                       <span className="tabular-nums">{formatDate(r.created_at)}</span>
                     </span>
-                    <StatusBadge status={r.status} />
+                    <StatusBadge status={r.status}>{statusText(r)}</StatusBadge>
                   </span>
-                  <span className="text-base font-semibold">{r.title}</span>
+                  <span title={r.title} className="block truncate text-base font-semibold">
+                    {r.title}
+                  </span>
                   <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <PriorityBadge priority={r.priority} />
                     <span className="text-[13px] text-muted">{r.category.name}</span>
@@ -165,13 +219,15 @@ export function RequestsPage() {
                 {data.items.map((r) => (
                   <RowLink key={r.id} onOpen={() => navigate(`/requests/${r.id}`)}>
                     <Td className="w-24 text-[13px] font-semibold tabular-nums text-muted">{r.reference}</Td>
-                    <Td className="font-semibold">{r.title}</Td>
+                    <Td title={r.title} className="w-[36%] max-w-0 truncate font-semibold">
+                      {r.title}
+                    </Td>
                     <Td>{r.category.name}</Td>
                     <Td>
                       <PriorityBadge priority={r.priority} />
                     </Td>
                     <Td>
-                      <StatusBadge status={r.status} />
+                      <StatusBadge status={r.status}>{statusText(r)}</StatusBadge>
                     </Td>
                     <Td>{r.requester.full_name}</Td>
                     <Td>{r.assignee?.full_name ?? <span className="italic text-muted">Unassigned</span>}</Td>
@@ -184,7 +240,7 @@ export function RequestsPage() {
 
           <div className="mt-5 flex items-center justify-between gap-3 text-[13px] text-muted">
             <span className="tabular-nums">
-              Page {data.page} of {pages} · {data.total} requests
+              Page {data.page} of {pages} · {plural(data.total, 'request')}
             </span>
             <div className="flex gap-2">
               <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>

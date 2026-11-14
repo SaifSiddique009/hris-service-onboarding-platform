@@ -68,6 +68,13 @@
 @layer base {
   body {
     @apply bg-page font-sans text-ink antialiased;
+    /* A long word with no spaces must wrap, never widen the page. */
+    overflow-wrap: anywhere;
+  }
+  /* Inside a table that rule would squeeze short columns and split their words. */
+  td,
+  th {
+    overflow-wrap: break-word;
   }
   :focus-visible {
     outline: 2px solid var(--color-focus);

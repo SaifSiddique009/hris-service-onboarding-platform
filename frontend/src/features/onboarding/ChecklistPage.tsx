@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil } from 'lucide-react'
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { api, type ApiError } from '../../api/client'
 import type { ChecklistDetail, OnboardingTaskDetail, TaskUpdate, UserSummary } from '../../api/types'
 import { Button } from '../../components/Button'
@@ -11,12 +11,14 @@ import { FormDialog } from '../../components/FormDialog'
 import { PageHeader } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { EmptyState } from '../../components/States'
-import { errorText, formatDay } from '../../lib/format'
+import { errorText, formatDay, plural } from '../../lib/format'
+import { toast } from '../../lib/toast'
 import { useAuth } from '../auth/AuthContext'
 import { useDepartments } from '../requests/queries'
 import { ChoiceField } from './ChoiceField'
 import { PersonPicker } from './PersonPicker'
-import { ProgressSummary } from './ProgressSummary'
+import { ProgressSummary, type TaskFilter } from './ProgressSummary'
+import { jumpTo } from './jumpTo'
 import { TaskCard } from './TaskCard'
 
 function EditTaskDialog({ task, onClose }: { task: OnboardingTaskDetail; onClose: () => void }) {
@@ -30,6 +32,7 @@ function EditTaskDialog({ task, onClose }: { task: OnboardingTaskDetail; onClose
     mutationFn: (body: TaskUpdate) => api(`/onboarding/tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['onboarding'] })
+      toast('Task updated')
       onClose()
     },
   })
@@ -93,17 +96,31 @@ function EditTask({ task }: { task: OnboardingTaskDetail }) {
 
 export function ChecklistView({ path, title, back }: { path: string; title?: string; back?: { to: string; label: string } }) {
   const { user } = useAuth()
+  const [filter, setFilter] = useState<TaskFilter>()
   const query = useQuery<ChecklistDetail, ApiError>({
     queryKey: ['onboarding', 'checklist', path],
     queryFn: () => api(path),
   })
 
+  if (query.error?.status === 404 && path.endsWith('/me')) {
+    return (
+      <EmptyState
+        title="You have no onboarding checklist"
+        help="Onboarding checklists are given to new hires. If you expected one, ask an HR Admin."
+      />
+    )
+  }
   if (query.error?.status === 404) {
     return (
-      <>
-        <PageHeader title={title ?? 'Checklist'} eyebrow="Onboarding" back={back} />
-        <EmptyState title="No checklist yet" help={query.error.message} />
-      </>
+      <EmptyState
+        title="Checklist not found"
+        help="It may not exist, or you may not have access to it."
+        action={
+          <Link to={back?.to ?? '/'} className="text-sm font-semibold">
+            {back ? `Back to ${back.label.toLowerCase()}` : 'Back to home'}
+          </Link>
+        }
+      />
     )
   }
 
@@ -111,23 +128,48 @@ export function ChecklistView({ path, title, back }: { path: string; title?: str
     <QueryBoundary query={query}>
       {(c) => {
         const numbers = new Map(c.tasks.map((t, i) => [t.id, i + 1]))
+        const matches = { blocked: (t: OnboardingTaskDetail) => t.effective_status === 'BLOCKED', overdue: (t: OnboardingTaskDetail) => t.is_overdue }
+        const shown = filter ? c.tasks.filter(matches[filter]) : c.tasks
+        // A filter that no longer matches anything (after an action) clears itself.
+        const active = filter && shown.length > 0 ? filter : undefined
+        const tasks = active ? shown : c.tasks
+        const jump = (id: number) => {
+          if (active && !shown.some((t) => t.id === id)) {
+            setFilter(undefined)
+            setTimeout(() => jumpTo(id), 50)
+          } else jumpTo(id)
+        }
         return (
           <>
             <PageHeader
               title={title ?? c.employee.full_name}
               eyebrow="Onboarding"
               back={back}
-              subtitle={`${c.employee.job_title} · ${c.employee.department.name} · ${c.employee.country.name}`}
+              subtitle={
+                <>
+                  {c.employee.job_title} · {c.employee.department.name} · {c.employee.country.name}
+                  <span className="mt-1 block text-[13.5px] text-muted">
+                    Start date {formatDay(c.start_date)} · {c.template.name}
+                  </span>
+                </>
+              }
+              actions={
+                <div className="w-[min(440px,calc(100vw-2rem))]">
+                  <ProgressSummary progress={c.progress} filter={active} onFilter={setFilter} />
+                </div>
+              }
             />
-            <div className="max-w-xl border-t-2 border-ink pt-3.5">
-              <p className="mb-4 text-[13px] text-muted">
-                Start date {formatDay(c.start_date)} · {c.template.name}
+            {active && (
+              <p className="mb-3 flex flex-wrap items-center gap-x-3 text-[14px] text-muted" role="status">
+                Showing {plural(shown.length, `${active} task`)}
+                <Button size="sm" variant="ghost" onClick={() => setFilter(undefined)}>
+                  Show all tasks
+                </Button>
               </p>
-              <ProgressSummary progress={c.progress} />
-            </div>
-            <ol className="mt-14 border-t border-ink">
-              {c.tasks.map((t) => (
-                <TaskCard key={t.id} task={t} number={numbers.get(t.id)} numbers={numbers} history={t.history}>
+            )}
+            <ol className="border-t border-ink">
+              {tasks.map((t) => (
+                <TaskCard key={t.id} task={t} number={numbers.get(t.id)} numbers={numbers} onJump={jump} history={t.history}>
                   {user?.role === 'HR_ADMIN' && <EditTask task={t} />}
                 </TaskCard>
               ))}

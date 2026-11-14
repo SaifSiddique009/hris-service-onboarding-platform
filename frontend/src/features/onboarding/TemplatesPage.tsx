@@ -11,12 +11,10 @@ import { PageHeader } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { StatusBadge } from '../../components/RequestBadges'
 import { EmptyState } from '../../components/States'
-import { RowLink, Table, Td, Th } from '../../components/Table'
-import { errorText } from '../../lib/format'
+import { errorText, formatDate, plural } from '../../lib/format'
+import { toast } from '../../lib/toast'
 
 export const ActiveBadge = ({ active }: { active: boolean }) => <StatusBadge status={active ? 'ACTIVE' : 'INACTIVE'} />
-
-const taskCount = (n: number) => `${n} ${n === 1 ? 'task' : 'tasks'}`
 
 function NewTemplateDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate()
@@ -28,6 +26,7 @@ function NewTemplateDialog({ onClose }: { onClose: () => void }) {
       api<TemplateDetail>('/onboarding/templates', { method: 'POST', body: JSON.stringify({ name: name.trim(), description: description.trim() }) }),
     onSuccess: (t) => {
       queryClient.invalidateQueries({ queryKey: ['onboarding', 'templates'] })
+      toast('Template created')
       navigate(`/onboarding/templates/${t.id}`)
     },
   })
@@ -53,7 +52,6 @@ function NewTemplateDialog({ onClose }: { onClose: () => void }) {
 }
 
 export function TemplatesPage() {
-  const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
   const list = useQuery({ queryKey: ['onboarding', 'templates'], queryFn: () => api<Template[]>('/onboarding/templates') })
   const newButton = (
@@ -76,47 +74,25 @@ export function TemplatesPage() {
           templates.length === 0 ? (
             <EmptyState title="No templates yet" help="A template is the task list a new hire receives." action={newButton} />
           ) : (
-            <>
-              <Table className="max-md:hidden">
-                <thead>
-                  <tr>
-                    <Th>Name</Th>
-                    <Th>Description</Th>
-                    <Th className="text-right">Tasks</Th>
-                    <Th>Status</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {templates.map((t) => (
-                    <RowLink key={t.id} onOpen={() => navigate(`/onboarding/templates/${t.id}`)}>
-                      <Td className="font-semibold">{t.name}</Td>
-                      <Td className="max-w-md text-n-600">{t.description}</Td>
-                      <Td className="text-right tabular-nums">{t.task_count}</Td>
-                      <Td>
-                        <ActiveBadge active={t.is_active} />
-                      </Td>
-                    </RowLink>
-                  ))}
-                </tbody>
-              </Table>
-              <ul className="border-t border-ink md:hidden">
-                {templates.map((t) => (
-                  <li key={t.id}>
-                    <Link
-                      to={`/onboarding/templates/${t.id}`}
-                      className="flex min-h-11 flex-col gap-2 border-b border-line py-4 text-ink no-underline hover:text-ink"
-                    >
-                      <span className="flex items-start justify-between gap-3">
-                        <span className="text-base font-semibold">{t.name}</span>
-                        <ActiveBadge active={t.is_active} />
-                      </span>
-                      <span className="text-[13px] text-n-600">{t.description}</span>
-                      <span className="text-[13px] tabular-nums text-muted">{taskCount(t.task_count)}</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </>
+            <ul className="border-t border-ink">
+              {templates.map((t) => (
+                <li key={t.id}>
+                  <Link
+                    to={`/onboarding/templates/${t.id}`}
+                    className="flex min-h-[72px] flex-wrap items-center gap-x-8 gap-y-1.5 border-b border-line py-4 text-ink no-underline hover:bg-n-100 hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus"
+                  >
+                    <span className="min-w-0 flex-[1_1_320px]">
+                      <span className="block font-serif text-xl">{t.name}</span>
+                      <span className="mt-0.5 block text-[13.5px] text-muted">{t.description}</span>
+                    </span>
+                    <span className="text-[13px] tabular-nums text-n-600">
+                      {plural(t.task_count, 'task')} · Updated {formatDate(t.updated_at)}
+                    </span>
+                    <ActiveBadge active={t.is_active} />
+                  </Link>
+                </li>
+              ))}
+            </ul>
           )
         }
       </QueryBoundary>

@@ -3,7 +3,7 @@ import { cn } from '../lib/cn'
 import { Spinner } from './Spinner'
 
 const base =
-  'inline-flex items-center justify-center gap-2 rounded-sm text-sm font-semibold whitespace-nowrap transition-colors duration-150 disabled:cursor-not-allowed disabled:border-grey-soft disabled:bg-grey-soft disabled:text-[#8a948d]'
+  'inline-flex items-center justify-center gap-2 rounded-sm text-sm font-semibold whitespace-nowrap transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:border-n-300 disabled:bg-grey-soft disabled:text-n-500'
 
 const variants = {
   primary: 'border border-accent bg-accent text-paper hover:border-accent-hover hover:bg-accent-hover active:bg-accent-press',

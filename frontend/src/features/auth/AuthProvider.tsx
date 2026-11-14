@@ -1,15 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { api, clearToken, getToken, setToken } from '../../api/client'
-import type { User } from '../../api/types'
+import type { LoginResponse, User } from '../../api/types'
 import { AuthContext } from './AuthContext'
-
-interface LoginResponse {
-  access_token: string
-  token_type: string
-  expires_in: number
-  user: User
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
@@ -38,8 +31,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await api<void>('/auth/logout', { method: 'POST' })
     } finally {
       clearToken()
-      setHasToken(false)
       queryClient.clear()
+      // A full load of the plain sign-in page: no return address, no leftover state.
+      window.location.assign('/login')
     }
   }
 

@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react'
+import { ChevronDown, Search } from 'lucide-react'
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import { cn } from '../lib/cn'
 
@@ -39,7 +39,10 @@ export const SearchInput = (props: InputHTMLAttributes<HTMLInputElement>) => (
 )
 
 export const Select = (props: SelectHTMLAttributes<HTMLSelectElement>) => (
-  <select {...props} className={cn(control, props.className)} />
+  <span className="relative block">
+    <select {...props} className={cn(control, 'appearance-none pr-9', props.className)} />
+    <ChevronDown aria-hidden size={16} strokeWidth={1.8} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" />
+  </span>
 )
 
 export const Textarea = (props: TextareaHTMLAttributes<HTMLTextAreaElement>) => (

@@ -14,6 +14,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { EmptyState } from '../../components/States'
 import { errorText, formatDay } from '../../lib/format'
+import { toast } from '../../lib/toast'
 import { useAuth } from '../auth/AuthContext'
 import { useCountries } from '../requests/queries'
 import { ChoiceField } from './ChoiceField'
@@ -38,6 +39,7 @@ function AssignDialog({ onClose }: { onClose: () => void }) {
       api<ChecklistCreated>('/onboarding/checklists', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: (c) => {
       queryClient.invalidateQueries({ queryKey: ['onboarding'] })
+      toast('Checklist assigned')
       if (c.warnings.length) setCreated(c)
       else open(c)
     },
@@ -159,7 +161,7 @@ export function TeamOnboardingPage() {
       <PageHeader
         title="Team onboarding"
         eyebrow="Onboarding"
-        subtitle={isAdmin ? 'Everyone currently being onboarded.' : 'New hires in your team.'}
+        subtitle="New hires and their onboarding progress."
         actions={isAdmin && <Button onClick={() => setAssigning(true)}>Assign checklist</Button>}
       />
 
@@ -188,17 +190,25 @@ export function TeamOnboardingPage() {
       <QueryBoundary query={list}>
         {(items) =>
           items.length === 0 ? (
-            <EmptyState
-              title="No onboarding checklists match these filters"
-              help="Try another state or country."
-              action={
-                params.size > 0 && (
+            params.size > 0 ? (
+              <EmptyState
+                title="No checklists match these filters."
+                help="Try another state or country."
+                action={
                   <Button variant="secondary" onClick={() => setParams({})}>
                     Clear filters
                   </Button>
-                )
-              }
-            />
+                }
+              />
+            ) : isAdmin ? (
+              <EmptyState
+                title="No onboarding checklists yet."
+                help="Assign a template to a new hire to start one."
+                action={<Button onClick={() => setAssigning(true)}>Assign checklist</Button>}
+              />
+            ) : (
+              <EmptyState title="No one in your team is being onboarded." />
+            )
           ) : (
             <ul className="grid grid-cols-1 gap-x-10 gap-y-10 lg:grid-cols-2">
               {items.map((c) => (

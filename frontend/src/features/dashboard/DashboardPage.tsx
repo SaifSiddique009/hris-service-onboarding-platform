@@ -5,12 +5,12 @@ import { Bar, BarChart, LabelList, XAxis, YAxis } from 'recharts'
 import { api } from '../../api/client'
 import type { HeadcountReport, InsightsReport, OnboardingReport, RequestStatus, RequestsReport } from '../../api/types'
 import { Avatar } from '../../components/Avatar'
-import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { PageHeader, eyebrowClass } from '../../components/PageHeader'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { StatusBadge } from '../../components/RequestBadges'
 import { cn } from '../../lib/cn'
+import { plural } from '../../lib/format'
 import { useAuth } from '../auth/AuthContext'
 import { ChartCard, animate } from './ChartCard'
 
@@ -25,7 +25,6 @@ const tick = { fontSize: 13.5, fill: 'var(--color-ink)' }
 const barLabel = { className: 'font-semibold tabular-nums', fontSize: 13.5, fill: 'var(--color-ink)' }
 
 const useReport = <T,>(name: string) => useQuery({ queryKey: ['dashboard', name], queryFn: () => api<T>(`/dashboard/${name}`) })
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
 const today = () => new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
 
@@ -79,45 +78,58 @@ function Attention() {
               <p className="flex items-start gap-3 text-[14.5px]">
                 <Lock aria-hidden size={16} strokeWidth={1.8} className="mt-1 shrink-0" />
                 <span>
-                  <b className="font-semibold">Work held by inactive users.</b> {plural(held.requests, 'open request is', 'open requests are')} and{' '}
-                  {plural(held.onboarding_tasks, 'onboarding task is', 'onboarding tasks are')} assigned to people who can no longer sign in.
+                  <b className="font-semibold">Work held by inactive users.</b>{' '}
+                  {[
+                    held.requests > 0 && plural(held.requests, 'open request'),
+                    held.onboarding_tasks > 0 && plural(held.onboarding_tasks, 'onboarding task'),
+                  ]
+                    .filter(Boolean)
+                    .join(' and ')}{' '}
+                  {held.requests > 0 && held.onboarding_tasks > 0 ? 'are' : (held.requests || held.onboarding_tasks) === 1 ? 'is' : 'are'}{' '}
+                  assigned to people who can no longer sign in.
                 </span>
               </p>
-              <Link to="/people" className="no-underline">
-                <Button variant="secondary">Review people</Button>
+              <Link
+                to="/people?is_active=false"
+                className="inline-flex min-h-10 items-center justify-center rounded-sm border border-control px-4 text-sm font-semibold whitespace-nowrap text-ink no-underline hover:bg-n-100 hover:text-ink max-md:min-h-11"
+              >
+                Review people
               </Link>
             </div>
           )}
 
           <section className="mt-14" aria-labelledby="insight">
-            <p className={cn(eyebrowClass, 'text-danger')}>Key insight</p>
-            <h2 id="insight" className="mt-1.5 font-serif text-[28px] leading-[1.2]">
-              New hires waiting on requests
-            </h2>
+            <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2 border-b border-ink pb-3.5">
+              <div>
+                <p className={cn(eyebrowClass, 'text-danger')}>Key insight</p>
+                <h2 id="insight" className="mt-1.5 font-serif text-[28px] leading-[1.2]">
+                  New hires waiting on requests
+                </h2>
+              </div>
+              <p className="max-w-[420px] text-sm text-muted">
+                People in their first weeks whose own requests are still open, the clearest sign of a slow start.
+              </p>
+            </div>
             {hires.length === 0 ? (
-              <p className="mt-4 border-t border-ink pt-4 text-[14.5px] text-muted">No new hire is waiting on a request.</p>
+              <p className="pt-4 text-[14.5px] text-muted">No new hire is waiting on a request.</p>
             ) : (
-              <ul className="mt-5 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
+              <ul>
                 {hires.map((h) => (
-                  <li key={h.new_hire}>
-                    <Card variant="attention">
-                      <div className="flex items-center gap-3">
-                        <Avatar name={h.new_hire} />
-                        <div>
-                          <p className="text-[15px] font-semibold">{h.new_hire}</p>
-                          <p className="text-[13px] text-muted">{h.country}</p>
-                        </div>
-                      </div>
-                      <ul className="mt-3">
-                        {h.open_requests.map((r) => (
-                          <li key={r.reference} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line py-2.5 first:border-t-0">
-                            <Link
-                              to={`/requests/${Number(r.reference.slice(4))}`}
-                              className="text-[13px] font-semibold tabular-nums text-muted no-underline hover:text-ink"
-                            >
-                              {r.reference}
-                            </Link>
-                            <span className="min-w-0 flex-1 text-sm">
+                  <li key={h.new_hire} className="flex flex-wrap gap-x-8 gap-y-3 border-b border-line py-4">
+                    <div className="flex h-10 min-w-0 flex-[1_1_220px] items-center gap-3 self-start">
+                      <Avatar name={h.new_hire} />
+                      <p className="min-w-0 text-[15px] font-semibold">{h.new_hire}</p>
+                    </div>
+                    <p className="flex-[0_0_110px] pt-2.5 text-sm max-md:flex-auto max-md:pt-0 max-md:text-[13px] max-md:text-muted">{h.country}</p>
+                    <ul className="flex min-w-0 flex-[2_1_380px] flex-col gap-1.5">
+                      {h.open_requests.map((r) => (
+                        <li key={r.reference}>
+                          <Link
+                            to={`/requests/${Number(r.reference.slice(4))}`}
+                            className="-mx-2 flex min-h-10 items-center gap-x-3.5 gap-y-1.5 rounded-sm px-2 py-1 text-ink no-underline hover:bg-n-100 hover:text-ink"
+                          >
+                            <span className="w-[72px] shrink-0 text-[13px] font-semibold tabular-nums text-muted">{r.reference}</span>
+                            <span title={r.title ?? undefined} className="min-w-0 flex-1 truncate text-sm">
                               {r.title ?? (
                                 <span className="inline-flex items-center gap-1.5 italic text-muted">
                                   <Lock aria-hidden size={14} strokeWidth={1.8} />
@@ -126,10 +138,10 @@ function Attention() {
                               )}
                             </span>
                             <StatusBadge status={r.status} />
-                          </li>
-                        ))}
-                      </ul>
-                    </Card>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
                   </li>
                 ))}
               </ul>
@@ -167,7 +179,7 @@ function StatusBar({ report }: { report: RequestsReport }) {
             <span key={c.s} style={{ flexGrow: c.count, background: statusColor[c.s] }} className="min-w-1 rounded-[1px]" />
           ))}
       </div>
-      <ul className="mt-5 grid grid-cols-1 gap-x-8 gap-y-2.5 sm:grid-cols-2">
+      <ul className="mt-5 grid grid-cols-2 gap-x-8 gap-y-2.5 lg:grid-cols-4">
         {counts.map((c) => (
           <li key={c.s} className="flex items-center justify-between gap-3 text-sm">
             <StatusBadge status={c.s} />
@@ -185,6 +197,9 @@ function Charts() {
   const insights = useReport<InsightsReport>('insights')
   return (
     <div className="mt-14 grid grid-cols-1 gap-x-12 gap-y-12 lg:grid-cols-2">
+      <div className="lg:col-span-2">
+        <QueryBoundary query={requests}>{(r) => <StatusBar report={r} />}</QueryBoundary>
+      </div>
       <QueryBoundary query={headcount}>
         {(h) => (
           <>
@@ -194,12 +209,7 @@ function Charts() {
         )}
       </QueryBoundary>
       <QueryBoundary query={requests}>
-        {(r) => (
-          <>
-            <StatusBar report={r} />
-            <CountBars title="Open requests by category" subtitle="Requests that are not closed" data={r.by_category} />
-          </>
-        )}
+        {(r) => <CountBars title="Open requests by category" subtitle="Requests that are not closed" data={r.by_category} />}
       </QueryBoundary>
       <QueryBoundary query={insights}>
         {({ onboarding_completion_by_country: completion }) => (
@@ -207,11 +217,23 @@ function Charts() {
             <BarChart
               data={completion.map((c) => ({ ...c, percent: Math.round(c.rate * 100) }))}
               layout="vertical"
-              margin={{ top: 0, right: 44, bottom: 0, left: 0 }}
+              margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
               barCategoryGap={12}
             >
               <XAxis hide type="number" domain={[0, 100]} />
               <YAxis type="category" dataKey="country" width={128} axisLine={false} tickLine={false} tick={tick} interval={0} />
+              <YAxis
+                yAxisId="value"
+                orientation="right"
+                type="category"
+                dataKey="percent"
+                width={52}
+                axisLine={false}
+                tickLine={false}
+                tick={{ ...tick, fontWeight: 600 }}
+                tickFormatter={(v) => `${v}%`}
+                interval={0}
+              />
               <Bar
                 dataKey="percent"
                 name="Completed"
@@ -221,7 +243,6 @@ function Charts() {
                 background={{ fill: 'var(--color-n-150)', radius: 1 }}
                 isAnimationActive={animate}
               >
-                <LabelList dataKey="percent" position="right" formatter={(v) => `${v}%`} {...barLabel} />
               </Bar>
             </BarChart>
           </ChartCard>
@@ -241,9 +262,10 @@ export function DashboardPage() {
   if (requests.data && onboarding.data && insights.data) {
     const overdue = onboarding.data.overdue_tasks
     const waiting = insights.data.new_hires_with_open_requests.length
-    const overdueText = overdue === 0 ? 'No onboarding tasks are overdue' : `${plural(overdue, 'onboarding task is', 'onboarding tasks are')} overdue`
-    const waitingText = waiting === 0 ? '' : `, and ${plural(waiting, 'new hire is', 'new hires are')} still waiting on requests of their own`
-    lede = `${plural(requests.data.open_total, 'request is', 'requests are')} open. ${overdueText}${waitingText}.`
+    const open = requests.data.open_total
+    const overdueText = overdue === 0 ? 'No onboarding tasks are overdue' : `${plural(overdue, 'onboarding task')} ${overdue === 1 ? 'is' : 'are'} overdue`
+    const waitingText = waiting === 0 ? '' : `, and ${plural(waiting, 'new hire')} ${waiting === 1 ? 'is' : 'are'} still waiting on requests of their own`
+    lede = `${open === 0 ? 'No requests are' : `${plural(open, 'request')} ${open === 1 ? 'is' : 'are'}`} open. ${overdueText}${waitingText}.`
   }
 
   return (

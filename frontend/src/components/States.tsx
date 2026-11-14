@@ -30,20 +30,43 @@ export function EmptyState({ title, help, action }: { title: string; help?: Reac
   )
 }
 
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+interface ErrorProps {
+  message: string
+  status?: number
+  onRetry?: () => void
+  action?: ReactNode
+}
+
+export function ErrorState({ message, status, onRetry, action }: ErrorProps) {
+  const network = status === 0
+  const invalid = status === 422
+  const generic = status === undefined || status >= 500
+  const title = invalid ? 'This address has a value that is not valid' : generic ? 'Something went wrong' : message
+  const detail = network
+    ? 'Check your connection and try again. Nothing was changed.'
+    : invalid
+      ? message
+      : generic
+        ? 'Nothing was changed. Try again in a moment.'
+        : undefined
   return (
     <div role="alert" className="max-w-[620px] border-t-2 border-danger py-10">
       <p className={`${eyebrowClass} flex items-center gap-2 text-danger`}>
         <AlertTriangle aria-hidden size={14} strokeWidth={1.8} />
         Couldn’t load
       </p>
-      <p className="mt-3 font-serif text-[28px] leading-[1.2]">{message}</p>
-      <p className="mt-3 text-[15px] text-n-600">Check your connection and try again. Nothing was changed.</p>
-      {onRetry && (
-        <Button variant="secondary" className="mt-6" onClick={onRetry}>
-          <RefreshCw aria-hidden size={16} strokeWidth={1.8} />
-          Try again
-        </Button>
+      <p className="mt-3 font-serif text-[28px] leading-[1.2]">{network ? message : title}</p>
+      {detail && <p className="mt-3 text-[15px] text-n-600">{detail}</p>}
+      {invalid ? (
+        <div className="mt-6">{action ?? <a href={window.location.pathname}>Reload the page</a>}</div>
+      ) : (
+        (network || generic) &&
+        onRetry && (
+          <Button variant="secondary" className="mt-6" onClick={onRetry}>
+            <RefreshCw aria-hidden size={16} strokeWidth={1.8} />
+            Try again
+          </Button>
+        )
       )}
     </div>
   )
