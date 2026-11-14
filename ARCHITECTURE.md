@@ -328,6 +328,7 @@ Indexes: `status`, `requester_id`, `assignee_id`, `category_id`.
 | from_status | `request_status` | nullable (null for the creation event) |
 | to_status | `request_status` | not null |
 | actor_id | integer | not null, FK `users` |
+| assignee_id | integer | nullable, FK `users`; set on an assign or reassign, so the history can say who received the request |
 | note | text | nullable |
 | created_at | timestamptz | not null |
 
@@ -481,8 +482,9 @@ Base path: `/api/v1`. JSON in and out. Authenticated endpoints need `Authorizati
 ### 3.1 Conventions
 
 - **Lists** return `{ "items": [...], "total": n, "page": n, "page_size": n }`, written below as `Page<T>`.
-- **Errors** return `{ "error": { "code": "TASK_BLOCKED", "message": "...", "details": {...} } }`.
-- **Text input** is trimmed before validation, so a value made only of spaces counts as empty. Search text is matched literally: `%` and `_` are not wildcards.
+- **Errors** return `{ "error": { "code": "TASK_BLOCKED", "message": "...", "details": {...} } }`. The message is a sentence a person can act on. For a validation error it names the field ("Title must be at least 3 characters") and `details.fields` maps each field to its own sentence.
+- **Text input** is trimmed before validation and zero-width and NUL characters are removed, so a value made only of spaces or invisible characters counts as empty. Search text is trimmed and matched literally: `%` and `_` are not wildcards.
+- **Dates entered by a person** (joining date, checklist start date, task due date) must fall between the year 2000 and one year from today. A task's due date cannot be earlier than its checklist's start date.
 
 | Status | Meaning |
 |---|---|
@@ -490,7 +492,7 @@ Base path: `/api/v1`. JSON in and out. Authenticated endpoints need `Authorizati
 | 403 | The caller's role may not use this endpoint, or may not perform this action on a row they can see |
 | 404 | The row does not exist, or is outside the caller's scope (existence is not revealed) |
 | 409 | The action conflicts with the current state: action not allowed from this status, blocked task, dependency cycle |
-| 422 | Request body failed validation |
+| 422 | The request failed validation: a field rule, an unknown action name, or a value the database cannot hold (an id beyond a 32-bit integer) |
 
 **Auth column key:** `Any` is any logged-in user. A role name means that role only. "Scoped" means every role may call it, and the result is limited to rows the caller may see (section 4).
 
@@ -508,7 +510,7 @@ RequestSummary  { id, reference, title, category: {id, name}, priority, status, 
 RequestDetail   RequestSummary + { description, resolved_at, closed_at,
                   history: StatusEvent[], assignments: Assignment[], comments: Comment[],
                   allowed_actions: string[] }
-StatusEvent     { from_status, to_status, actor: UserSummary, note, created_at }
+StatusEvent     { from_status, to_status, actor: UserSummary, assignee: UserSummary | null, note, created_at }
 Assignment      { assignee: UserSummary, assigned_by: UserSummary, note, created_at }
 Comment         { id, author: UserSummary, body, created_at }
 
@@ -537,17 +539,22 @@ TaskEvent       { from_status, to_status, actor: UserSummary, note, created_at }
 | POST | `/auth/login` | `{ email, password }` | `{ access_token, token_type, expires_in, user: User }` | Public |
 | POST | `/auth/logout` | | `204`; invalidates every token issued to the caller | Any |
 | GET | `/auth/me` | | `User` | Any |
+| POST | `/auth/password` | `{ current_password, new_password }` | The login response, with a new token. Every older token of the caller stops working. `422` names the field: wrong current password, weak new password, or a new password equal to the current one | Any |
+| POST | `/auth/forgot-password` | `{ email }` | `{ message }`, the same reply whether or not the email has an account | Public |
+
+A person who forgot their password asks from the sign-in page. For an active account this raises an ordinary service request in that person's name, in the confidential "Account Access" category, so it reaches HR Admin through the normal queue and has a history like any other request. At most one unresolved reset request exists per person. An HR Admin checks who is asking and sets a new password with `POST /users/{id}/password` (section 3.4). That also ends every session the person has. The admin passes the new password on privately and the person changes it on their Account page. Reset by email is not included (section 8).
 | GET | `/health` | | `{ status }` | Public |
 
 ### 3.4 Users
 
 | Method | Path | Request | Response | Auth |
 |---|---|---|---|---|
-| GET | `/users` | query: `country, department_id, role, status, search, page, page_size` | `Page<User>` | HR Admin: all users. Manager: direct reports only. |
-| GET | `/users/lookup` | query: `department_id, search` | `UserSummary[]` | Manager, HR Admin (assignee pickers) |
+| GET | `/users` | query: `country, department_id, role, status, is_active, search, page, page_size` | `Page<User>` | HR Admin: all users. Manager: direct reports only. |
+| GET | `/users/lookup` | query: `department_id, search, managing` (`managing=true` returns only Managers and HR Admins) | `UserSummary[]`, active users, first 50 | Manager, HR Admin (assignee and manager pickers) |
 | GET | `/users/{id}` | | `User` | HR Admin, the user's manager, or the user |
 | POST | `/users` | `{ full_name, email, password, job_title, role, country, department_id, manager_id, status, joining_date }` | `201 User` | HR Admin |
-| PATCH | `/users/{id}` | any subset of `full_name, job_title, role, country, department_id, manager_id, status, joining_date, is_active`. Email and password are not editable here | `User + { open_items }`, the number of unresolved requests and incomplete onboarding tasks a deactivated user still holds | HR Admin |
+| PATCH | `/users/{id}` | any subset of `full_name, job_title, role, country, department_id, manager_id, status, joining_date, is_active`. Email and password are not editable here. An HR Admin cannot change their own role (`409 OWN_ROLE`) or disable their own sign-in (`409 OWN_ACCOUNT`), so administration cannot be locked out by accident | `User + { open_items, direct_reports }`: the unresolved requests and incomplete onboarding tasks a deactivated user still holds, and the active people who still report to them | HR Admin |
+| POST | `/users/{id}/password` | `{ new_password }` | `204`; the person is signed out everywhere. `409 OWN_PASSWORD` for the caller's own account, which must use `/auth/password` and prove the current password | HR Admin |
 | GET | `/departments` | | `Department[]` | Any |
 | PATCH | `/departments/{id}` | `{ head_id }` | `Department` | HR Admin |
 | GET | `/countries` | | `Country[]` | Any |
@@ -558,7 +565,7 @@ TaskEvent       { from_status, to_status, actor: UserSummary, note, created_at }
 |---|---|---|---|---|
 | GET | `/request-categories` | | `Category[]` | Any |
 | POST | `/requests` | `{ title, description, category_id, priority }` | `201 RequestDetail` | Any |
-| GET | `/requests` | query: `view` (`mine`, `assigned`, `team`, `queue`, `all`), `status, category_id, priority, country, search, page, page_size` | `Page<RequestSummary>` | Scoped |
+| GET | `/requests` | query: `view` (`mine`, `assigned`, `team`, `queue`, `all`), `status, category_id, priority, country, search, page, page_size`. `search` matches the title or the reference (`REQ-0055` or `55`) | `Page<RequestSummary>` | Scoped |
 | GET | `/requests/{id}` | | `RequestDetail` | Scoped |
 | POST | `/requests/{id}/assign` | `{ assignee_id, note? }` | `RequestDetail`; `409 ALREADY_ASSIGNED` if the request is no longer Submitted | A triager of the request (section 4.1) |
 | POST | `/requests/{id}/reassign` | `{ assignee_id, note? }` | `RequestDetail` | A triager of the request |
@@ -578,13 +585,13 @@ TaskEvent       { from_status, to_status, actor: UserSummary, note, created_at }
 | POST | `/onboarding/templates/{id}/tasks` | `{ title, description, owner_kind, owner_department_id?, deadline_unit, deadline_value, depends_on_task_id?, sort_order? }` | `201 TemplateTask` | HR Admin |
 | PATCH | `/onboarding/templates/{id}/tasks/{task_id}` | any subset of the fields above | `TemplateTask` | HR Admin |
 | DELETE | `/onboarding/templates/{id}/tasks/{task_id}` | | `204`; `409` if another task depends on it | HR Admin |
-| POST | `/onboarding/checklists` | `{ employee_id, template_id, start_date? }` | `201 ChecklistDetail + { warnings: string[] }`, one warning per task that fell back to the assigning admin | HR Admin |
+| POST | `/onboarding/checklists` | `{ employee_id, template_id, start_date? }` | `201 ChecklistDetail + { warnings: string[] }`, one warning per task that fell back to the assigning admin, and one if the start date is more than 30 days in the past, since every task may then be overdue at once | HR Admin |
 | GET | `/onboarding/checklists` | query: `state` (`active`, `completed`), `country` | `ChecklistSummary[]` | Scoped: HR Admin all, Manager direct reports, Employee own |
 | GET | `/onboarding/checklists/me` | | `ChecklistDetail`; `404` if none | Any |
 | GET | `/onboarding/checklists/{id}` | | `ChecklistDetail` | Scoped |
-| GET | `/onboarding/tasks/mine` | query: `state` (`open`, `blocked`, `overdue`, `completed`) | `OnboardingTask[]` | Any; returns tasks where the caller is the assignee, across all new hires |
+| GET | `/onboarding/tasks/mine` | query: `state` (`open`, `blocked`, `overdue`, `completed`; `open` leaves out blocked tasks, so open + blocked + completed is every task) | `OnboardingTask[]` | Any; returns tasks where the caller is the assignee, across all new hires |
 | POST | `/onboarding/tasks/{id}/transitions` | `{ action }` where `action` is `start`, `complete`, `put_back` or `reopen` | `OnboardingTask`; `409 TASK_BLOCKED` if the dependency is not completed | Task assignee, HR Admin |
-| PATCH | `/onboarding/tasks/{id}` | `{ assignee_id?, due_date? }` | `OnboardingTask`; each change writes a history row | HR Admin |
+| PATCH | `/onboarding/tasks/{id}` | `{ assignee_id?, due_date? }` | `OnboardingTask`; each change writes a history row. `422` if the due date is before the checklist's start date | HR Admin |
 
 Saving a template task checks that the chain of dependencies does not loop back to itself.
 
@@ -616,7 +623,7 @@ A manager's view of onboarding progress per direct report is served by `GET /onb
 
 | Method | Path | Request | Response | Auth |
 |---|---|---|---|---|
-| POST | `/ai/query` | `{ question }` (1 to 500 characters) | `{ answer, tools_used: [{ name, arguments, row_count, rows }] }` | HR Admin |
+| POST | `/ai/query` | `{ question, history? }`: the question is 1 to 500 characters; `history` is up to 4 earlier `{ question, answer }` turns of the same chat | `{ answer, tools_used: [{ name, label, arguments, row_count, total, truncated, rows }] }`. `label` names what was read ("service requests"), `total` is how many matched, `truncated` is true when `rows` is only the first part | HR Admin |
 
 How a question is answered:
 
@@ -661,7 +668,8 @@ Behaviour at the edges:
 
 - A question the tools cannot answer gets a plain statement of what the assistant can answer, not a guess. This is enforced on the server: a reply produced without any tool call cannot contain platform data, so it is replaced by a fixed scope message whatever the model wrote.
 - Tool arguments that fail validation are returned to the model once as an error so it can correct them; a second failure ends the request with a clear message.
-- At most three tool rounds per question, at most four tool calls in a round, and at most 20 rows from any tool, so a question cannot run away.
+- At most three tool rounds per question, at most four tool calls in a round, and at most 20 rows from any tool, so a question cannot run away. When a list is cut, the tool result carries the full count and a note, so the model says "the first 20 of 57" instead of presenting the part as the whole; the screen shows the same line above the rows.
+- A follow-up such as "and in Cyprus?" works because the client sends the earlier turns of the chat. They are text only and only tell the model what the question refers to: every figure in the new answer still has to come from a tool call in this request, and a reply with no tool call is still replaced by the scope message. The chat itself lives in the browser and is cleared at sign-out; the server stores no conversation (section 8).
 - The provider limits tokens per minute for each model. The model setting is therefore an ordered list: a rate-limited model hands over to the next one, and the tool schemas are trimmed before sending to keep each call small.
 - An LLM timeout, an outage, or every model being rate limited returns a friendly error; the rest of the platform is unaffected.
 - The UI shows the tools, the filters and the returned rows next to the answer, so the admin can check the wording against the data.
@@ -686,7 +694,7 @@ Two terms used below:
 | See service requests | Own, and those assigned to them | Own, assigned to them, direct reports', and those in categories their department owns | All, with filters |
 | See requests in a confidential category | Own, and those assigned to them | Own, and those assigned to them | All |
 | Assign or reassign a request | No | As a triager | Any |
-| Reject a request | Only as its assignee | As a triager, or as its assignee | Any |
+| Reject a request | No | As a triager | Any |
 | Withdraw a submitted request | Own requests | Own requests | Own requests |
 | Start work, resolve | Only as the assignee | Only as the assignee | Only as the assignee |
 | Close a resolved request | Own requests | Own requests | Any |
@@ -706,7 +714,7 @@ Two kinds of rule appear in this table, and the design treats them separately:
 - **Role rules** depend only on who the caller is ("only HR Admin manages templates").
 - **Relationship rules** depend on the caller's link to a specific row ("only the assignee can start work"). An assignee or a task owner is not a role. It is any user who happens to be linked to that row.
 
-**Confidential categories.** HR Query is marked confidential. A question about pay, health or a complaint, possibly about the requester's own manager, must not land in that manager's list. Requests in a confidential category skip the manager entirely: only the requester, the person HR assigns, and HR Admin can see them, and only HR Admin can triage them. Because an assignee can read the request, a confidential request cannot be assigned to the requester's manager either.
+**Confidential categories.** HR Query is marked confidential. A question about pay, health or a complaint, possibly about the requester's own manager, must not land in that manager's list. Requests in a confidential category skip the manager entirely: only the requester, the person HR assigns, and HR Admin can see them, and only HR Admin can triage them. Because an assignee can read the request, a confidential request can only be assigned to someone in the department that owns the category (People & Culture for HR Query), and never to the requester's manager.
 
 This protects against the line manager, not against HR itself. Every HR Admin can read every request, so a complaint about an HR Admin, or about a manager who also holds the HR Admin role, needs a channel outside this platform. Closing that gap would take a per-case access list with named reviewers.
 
@@ -772,7 +780,7 @@ stateDiagram-v2
     SUBMITTED --> ASSIGNED: assign (triager)
     SUBMITTED --> CLOSED: withdraw (requester), reject (triager)
     ASSIGNED --> ASSIGNED: reassign (triager)
-    ASSIGNED --> CLOSED: reject (triager, assignee)
+    ASSIGNED --> CLOSED: reject (triager)
     ASSIGNED --> IN_PROGRESS: start (assignee)
     IN_PROGRESS --> ASSIGNED: reassign (triager)
     IN_PROGRESS --> RESOLVED: resolve (assignee)
@@ -787,7 +795,7 @@ stateDiagram-v2
 | assign | Submitted | Assigned | Triager | `assignee_id` required. The assignee must be an active user other than the requester, and for a confidential category must not be the requester's manager. Writes an assignment row. |
 | reassign | Assigned, In Progress | Assigned | Triager | Same assignee rules. Writes a new assignment row; work restarts with the new assignee. |
 | withdraw | Submitted | Closed | Requester | Closure reason `WITHDRAWN`. Sets `closed_at`. |
-| reject | Submitted, Assigned | Closed | Triager; from Assigned also the current assignee | A note saying why is required. Closure reason `REJECTED`. Sets `closed_at`. |
+| reject | Submitted, Assigned | Closed | Triager | A note saying why is required. Closure reason `REJECTED`. Sets `closed_at`. |
 | start | Assigned | In Progress | Current assignee | |
 | resolve | In Progress | Resolved | Current assignee | A resolution note is required. Sets `resolved_at`. |
 | reopen | Resolved | In Progress | Requester | A note saying what is still wrong is required. Clears `resolved_at`. |
@@ -799,7 +807,7 @@ Notes on the rules:
 
 - Assigning is the approval. A triager who assigns a request has accepted it as valid work; one who does not accept it uses reject, with a reason the requester can read.
 - Assign and reassign are separate actions on purpose. Two triagers can be looking at the same Submitted request. The first assign succeeds; the second fails with `409 ALREADY_ASSIGNED` and the page shows who took it. Replacing someone's choice then takes a deliberate reassign, not an accident of timing.
-- Withdraw is possible only while the request is Submitted. Reject is possible until work starts, so an assignee who is handed a duplicate or invalid request can send it back with a reason, and it is not recorded as completed work. Once a request is In Progress it ends through Resolved, so the person who did the work records the outcome.
+- Withdraw is possible only while the request is Submitted. Reject is possible until work starts, and only by a triager. Being handed a request does not give the right to close it: an assignee who receives a duplicate or invalid request says so in a comment and a triager rejects or reassigns it. Once a request is In Progress it ends through Resolved, so the person who did the work records the outcome.
 - Only the requester can reopen, because only the requester knows whether the problem is actually gone. HR Admin can close, so that resolved requests do not stay open forever when a requester does not respond.
 - Any action taken from a status it is not listed for, such as resolve on a Submitted request, is rejected with 409.
 
@@ -1002,9 +1010,10 @@ Rules that must hold at all times, and what guarantees each one.
 **Not included**
 
 - Notifications. Nothing emails or alerts a person when work is assigned to them, a request is reopened or a task becomes overdue; people see it when they open the platform. An outbox table written in the same transaction as the state change, with a small worker sending email, is the natural way to add it.
-- Single sign-on, multi-factor authentication, self-service password reset and login rate limiting. A company already using Google Workspace or Microsoft 365 would sign in through that provider instead of platform passwords.
+- Single sign-on, multi-factor authentication, password reset by email and login rate limiting. A forgotten password is reset by an HR Admin (section 3.3); nothing forces the person to change that password at the next sign-in, and the public forgot-password endpoint has no rate limit beyond one open request per person. A company already using Google Workspace or Microsoft 365 would sign in through that provider instead of platform passwords.
 - An audit trail for edits to user records. Changes to a person's role, manager, department or country take effect at once but are not recorded as history, although they drive every scope rule.
 - File attachments on requests and tasks.
+- Saved assistant chats. A chat lasts for the browser session. Saving chats on the server, with a short generated title for each, needs one decision first: a saved answer keeps showing data after the reader's access has changed. The safe design stores the question and the queries used, not the result rows, and runs them again under the reader's current access when the chat is opened.
 - Retention rules for request history and AI query logs.
 - Working-day calendars and public holidays (section 6.3).
 

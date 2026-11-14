@@ -22,19 +22,21 @@ The database is seeded on first start, so there is nothing to create. Every seed
 
 | Role | Email | Who this is | What to look at |
 |---|---|---|---|
-| HR Admin | `nadia.rahman@northbridge.example` | Head of People & Culture | Dashboard, all requests with filters, every onboarding checklist, templates, People, Assistant |
-| Manager | `lim.wei.jie@northbridge.example` | Engineering Manager with 8 direct reports, one of them a new hire | "My team" requests, Team onboarding for the new hire, tasks assigned to him as line manager |
-| Manager (resolving team) | `imran.hossain@northbridge.example` | Head of IT | "Department queue" of IT requests from every team, and "My tasks": IT onboarding tasks across new hires, one of them blocked |
-| Employee | `lee.xin.yi@northbridge.example` | QA Engineer who joined recently | Own requests only, and "My onboarding" with overdue and blocked tasks |
-| Employee | `jubayer.faruk@northbridge.example` | Marketing employee | Own requests, including a confidential HR query his manager cannot see |
+| HR Admin | `nadia.rahman@nextventure.example` | Head of People & Culture | Dashboard, all requests with filters, every onboarding checklist, templates, People, Assistant |
+| Manager | `lim.wei.jie@nextventure.example` | Engineering Manager with 8 direct reports, one of them a new hire | "My team" requests, Team onboarding for the new hire, tasks assigned to him as line manager |
+| Manager (resolving team) | `imran.hossain@nextventure.example` | Head of IT | "Department queue" of IT requests from every team, and "My tasks": IT onboarding tasks across new hires, one of them blocked |
+| Employee | `lee.xin.yi@nextventure.example` | QA Engineer who joined recently | Own requests only, and "My onboarding" with overdue and blocked tasks |
+| Employee | `jubayer.faruk@nextventure.example` | Marketing employee | Own requests, including a confidential HR query his manager cannot see |
 
-Any of the 100 seeded people can sign in the same way: `first.last@northbridge.example`.
+Any of the 100 seeded people can sign in the same way: `first.last@nextventure.example`.
+
+Everyone can change their own password on the Account page. An HR Admin creates accounts of any role, and sets a new password for a person who forgot theirs (People, Edit). "Forgot your password?" on the sign-in page raises a request to HR in that person's name.
 
 ### Things worth trying
 
 - **Access control.** Open a request as HR Admin, copy its URL, then sign in as an employee who is not involved and paste it. It shows "not found", the same as a request that does not exist.
 - **Request lifecycle.** As `lim.wei.jie`, open a Submitted request from "My team" and assign it. Sign in as the assignee to start and resolve it, then as the requester to close or reopen it. Each page shows only the buttons that person is allowed to use.
-- **Confidential requests.** `jubayer.faruk` has an HR query. His manager `sadia.chowdhury@northbridge.example` does not see it under "My team".
+- **Confidential requests.** `jubayer.faruk` has an HR query. His manager `sadia.chowdhury@nextventure.example` does not see it under "My team".
 - **Dependencies.** As `imran.hossain`, complete "Issue laptop and peripherals" in "My tasks". The task that was Blocked behind it becomes available at once.
 - **Assistant.** As HR Admin, ask "Which new hires are still waiting on IT equipment?" or "How many IT Equipment requests are unresolved in Cyprus?". Each answer shows the query that was run and the rows it returned.
 
@@ -72,7 +74,7 @@ Any of the 100 seeded people can sign in the same way: `first.last@northbridge.e
 | Backend | FastAPI, SQLAlchemy 2, Alembic, Pydantic v2 (hosted on Render) |
 | Database | PostgreSQL (hosted on Neon) |
 | AI | Groq chat completions with tool calling |
-| Tests | pytest against PostgreSQL: 130 tests |
+| Tests | pytest against PostgreSQL: 153 tests |
 
 The reasons for these choices, the data model, every endpoint, the access rules and both state machines are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
