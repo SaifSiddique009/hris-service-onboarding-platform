@@ -587,10 +587,12 @@ Saving a template task checks that the chain of dependencies does not loop back 
 
 | Method | Path | Response | Auth |
 |---|---|---|---|
-| GET | `/dashboard/headcount` | `{ total, by_country: [{country, count}], by_department: [...], by_status: [...] }` | HR Admin |
+| GET | `/dashboard/headcount` | `{ total, by_country: [{label, count}], by_department: [...], by_status: [...] }` | HR Admin |
 | GET | `/dashboard/requests` | `{ open_total, unresolved_total, awaiting_confirmation_total, by_status: [...], by_category: [...], by_priority: [...] }` | HR Admin |
 | GET | `/dashboard/onboarding` | `{ active_new_hires, completed_new_hires, overdue_tasks, blocked_tasks }` | HR Admin |
-| GET | `/dashboard/insights` | `{ new_hires_with_open_requests: [{ employee: UserSummary, open_requests: RequestSummary[] }], onboarding_completion_by_country: [{ country, total_tasks, completed_tasks, rate }], work_held_by_inactive_users: { requests, onboarding_tasks } }` | HR Admin |
+| GET | `/dashboard/insights` | `{ new_hires_with_open_requests: [{ new_hire, country, open_requests: ReportRow[] }], onboarding_completion_by_country: [{ country, total_tasks, completed_tasks, rate }], work_held_by_inactive_users: { requests, onboarding_tasks } }` | HR Admin |
+
+Every grouped figure is a list of `{ label, count }`, largest first. `ReportRow` is the flat request row that reports and AI tools share: `{ reference, title, category, status, priority, requester, country, assignee, created }`, where `title` is `null` for a request in a confidential category.
 
 Terms used by the dashboard and by the AI tools, defined once in code:
 
