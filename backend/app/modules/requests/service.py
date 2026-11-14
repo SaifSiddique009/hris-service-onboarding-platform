@@ -68,7 +68,8 @@ CLOSURE_REASONS = {
 
 
 def _scopes(user: User) -> dict:
-    not_confidential = ~RequestCategory.is_confidential
+    # HR Admin sees confidential requests in every view; nobody else does through team or queue.
+    not_confidential = true() if is_admin(user) else ~RequestCategory.is_confidential
     owns_queue = RequestCategory.owning_department_id == user.department_id
     if is_admin(user):
         queue = owns_queue
@@ -162,8 +163,8 @@ def assign(
     db: Session, user: User, request_id: int, assignee_id: int, note: str | None, action: str
 ) -> ServiceRequest:
     request = get_request(db, user, request_id, lock=True)
-    if action == "assign" and request.status != S.SUBMITTED and is_triager(user, request):
-        holder = request.assignee.full_name if request.assignee else "someone"
+    if action == "assign" and request.assignee and is_triager(user, request):
+        holder = request.assignee.full_name
         raise Conflict(f"This request was already assigned to {holder}", "ALREADY_ASSIGNED")
     check_action(ACTIONS, action, request, user)
 
@@ -220,6 +221,23 @@ def add_comment(db: Session, user: User, request_id: int, body: str) -> RequestC
     db.add(comment)
     db.commit()
     return comment
+
+
+def holds_confidential_request_from(db: Session, assignee_id: int, requester_id: int) -> bool:
+    """True while this person is the assignee of an open confidential request from that employee."""
+    return bool(
+        db.scalar(
+            select(func.count())
+            .select_from(ServiceRequest)
+            .join(ServiceRequest.category)
+            .where(
+                RequestCategory.is_confidential,
+                ServiceRequest.assignee_id == assignee_id,
+                ServiceRequest.requester_id == requester_id,
+                ServiceRequest.status.in_(OPEN),
+            )
+        )
+    )
 
 
 def count_open_assigned(db: Session, user_id: int) -> int:

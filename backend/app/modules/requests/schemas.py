@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, StringConstraints, computed_field
 
 from app.core.schemas import Out
 from app.modules.requests.models import ClosureReason, RequestPriority, RequestStatus
@@ -86,4 +87,4 @@ class TransitionIn(BaseModel):
 
 
 class CommentIn(BaseModel):
-    body: str = Field(min_length=1, max_length=4000)
+    body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
