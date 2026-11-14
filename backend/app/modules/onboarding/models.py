@@ -3,6 +3,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     CheckConstraint,
+    Date,
     Enum,
     ForeignKey,
     ForeignKeyConstraint,
@@ -10,12 +11,16 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    and_,
+    cast,
+    exists,
     func,
+    select,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, aliased, column_property, mapped_column, relationship
 
 from app.core.db import Base
-from app.modules.users.models import Department, User
+from app.modules.users.models import Country, Department, User
 
 
 class TaskOwnerKind(enum.StrEnum):
@@ -54,6 +59,10 @@ class OnboardingTemplate(Base):
         order_by="OnboardingTemplateTask.sort_order", back_populates="template"
     )
 
+    @property
+    def task_count(self) -> int:
+        return len(self.tasks)
+
 
 class OnboardingTemplateTask(Base):
     __tablename__ = "onboarding_template_tasks"
@@ -82,6 +91,10 @@ class OnboardingTemplateTask(Base):
     template: Mapped[OnboardingTemplate] = relationship(back_populates="tasks")
     owner_department: Mapped[Department | None] = relationship()
 
+    @property
+    def deadline_label(self) -> str:
+        return f"{self.deadline_unit.value.title()} {self.deadline_value}"
+
 
 class OnboardingChecklist(Base):
     __tablename__ = "onboarding_checklists"
@@ -98,6 +111,24 @@ class OnboardingChecklist(Base):
     tasks: Mapped[list["OnboardingTask"]] = relationship(
         order_by="OnboardingTask.sort_order", back_populates="checklist"
     )
+
+    @property
+    def progress(self) -> dict[str, int]:
+        tasks = self.tasks
+        return {
+            "total": len(tasks),
+            "completed": sum(t.status == TaskStatus.COMPLETED for t in tasks),
+            "in_progress": sum(t.status == TaskStatus.IN_PROGRESS for t in tasks),
+            "not_started": sum(
+                t.status == TaskStatus.NOT_STARTED and not t.is_blocked for t in tasks
+            ),
+            "blocked": sum(t.is_blocked for t in tasks),
+            "overdue": sum(t.is_overdue for t in tasks),
+        }
+
+    @property
+    def is_active(self) -> bool:
+        return any(t.status != TaskStatus.COMPLETED for t in self.tasks)
 
 
 class OnboardingTask(Base):
@@ -144,6 +175,14 @@ class OnboardingTask(Base):
         order_by="OnboardingTaskEvent.id", back_populates="task"
     )
 
+    @property
+    def employee(self) -> User:
+        return self.checklist.employee
+
+    @property
+    def effective_status(self) -> str:
+        return "BLOCKED" if self.is_blocked else self.status.value
+
 
 class OnboardingTaskEvent(Base):
     __tablename__ = "onboarding_task_events"
@@ -158,3 +197,28 @@ class OnboardingTaskEvent(Base):
 
     task: Mapped[OnboardingTask] = relationship(back_populates="history")
     actor: Mapped[User] = relationship()
+
+
+# Blocked and Overdue are never stored. They are SQL expressions, defined once here, so the same
+# rule serves a single task, a progress count and a dashboard aggregate.
+_dependency = aliased(OnboardingTask)
+OnboardingTask.is_blocked = column_property(
+    and_(
+        OnboardingTask.status == TaskStatus.NOT_STARTED,
+        exists().where(
+            _dependency.id == OnboardingTask.depends_on_task_id,
+            _dependency.status != TaskStatus.COMPLETED,
+        ),
+    )
+)
+# "Today" is the date in the new hire's country.
+_local_today = (
+    select(cast(func.timezone(Country.timezone, func.now()), Date))
+    .join(User, User.country_code == Country.code)
+    .join(OnboardingChecklist, OnboardingChecklist.employee_id == User.id)
+    .where(OnboardingChecklist.id == OnboardingTask.checklist_id)
+    .scalar_subquery()
+)
+OnboardingTask.is_overdue = column_property(
+    and_(OnboardingTask.status != TaskStatus.COMPLETED, OnboardingTask.due_date < _local_today)
+)
