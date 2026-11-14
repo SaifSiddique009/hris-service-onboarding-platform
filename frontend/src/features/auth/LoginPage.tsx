@@ -66,6 +66,11 @@ export function LoginPage() {
             <Button type="submit" loading={loading} className="w-full">
               Sign in
             </Button>
+            {loading && (
+              <p className="text-center text-xs text-slate-500">
+                The server sleeps when idle. The first sign-in can take up to a minute.
+              </p>
+            )}
           </form>
         </Card>
       </div>

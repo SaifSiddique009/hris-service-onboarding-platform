@@ -210,7 +210,8 @@ export function DashboardPage() {
         subtitle="Open means every request that is not closed. Unresolved means submitted, assigned or in progress."
       />
       <Kpis />
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* grid-cols-1 gives the column a zero minimum, so a chart can shrink to a phone's width. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <HeadcountCharts />
         <RequestCharts />
         <Insights />
