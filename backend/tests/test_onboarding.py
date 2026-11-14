@@ -12,7 +12,8 @@ from app.modules.users.models import Country
 
 API = "/api/v1/onboarding"
 LONG_AGO = "2020-01-06"
-FAR_AHEAD = "2099-01-05"
+AHEAD = date.today() + timedelta(days=200)
+FAR_AHEAD = AHEAD.isoformat()
 
 
 @pytest.fixture
@@ -136,6 +137,7 @@ def test_template_task_with_dependents_cannot_be_deleted(client, world, template
     blocked = client.delete(f"{url}/{account['id']}", headers=admin)
     assert blocked.status_code == 409
     assert blocked.json()["error"]["code"] == "HAS_DEPENDENTS"
+    assert "waits for this task" in blocked.json()["error"]["message"]
     assert client.delete(f"{url}/{laptop['id']}", headers=admin).status_code == 204
     assert client.delete(f"{url}/{account['id']}", headers=admin).status_code == 204
 
@@ -276,8 +278,9 @@ def test_only_the_assignee_or_hr_admin_changes_a_task(client, world, assign, act
 
 def test_task_actions_from_the_wrong_status_are_conflicts(world, assign, act):
     account = tasks_of(assign())["Create account"]
-    for action in ("put_back", "reopen", "teleport"):
+    for action in ("put_back", "reopen"):
         assert act(world.it_manager, account, action).status_code == 409
+    assert act(world.it_manager, account, "teleport").status_code == 422
     act(world.it_manager, account, "start")
     assert act(world.it_manager, account, "put_back").json()["status"] == "NOT_STARTED"
 
@@ -291,6 +294,7 @@ def test_completed_task_cannot_be_reopened_under_a_started_dependent(world, assi
     refused = act(world.it_manager, account, "reopen")
     assert refused.status_code == 409
     assert refused.json()["error"]["code"] == "DEPENDENT_STARTED"
+    assert refused.json()["error"]["message"].startswith('"Issue laptop" waits for this task')
 
     act(world.it_manager, laptop, "put_back")
     assert act(world.it_manager, account, "reopen").json()["status"] == "IN_PROGRESS"
@@ -333,18 +337,19 @@ def test_reassignment_and_due_date_change_are_recorded(client, world, assign):
     checklist = assign()
     account = tasks_of(checklist)["Create account"]
     url = f"{API}/tasks/{account['id']}"
-    body = {"assignee_id": world.it_engineer.id, "due_date": "2099-02-01"}
+    later = AHEAD + timedelta(days=20)
+    body = {"assignee_id": world.it_engineer.id, "due_date": later.isoformat()}
     assert client.patch(url, json=body, headers=auth(world.manager)).status_code == 403
 
     updated = client.patch(url, json=body, headers=auth(world.admin)).json()
     assert updated["assignee"]["full_name"] == "IT Engineer"
-    assert updated["due_date"] == "2099-02-01"
+    assert updated["due_date"] == later.isoformat()
 
     history = tasks_of(reload(client, world.admin, checklist).json())["Create account"]["history"]
     assert [event["note"] for event in history] == [
         None,
         "Reassigned from IT Manager to IT Engineer",
-        "Due date changed from 2099-01-05 to 2099-02-01",
+        f"Due date changed from {AHEAD.day} {AHEAD:%b %Y} to {later.day} {later:%b %Y}",
     ]
     assert history[1]["actor"]["full_name"] == "Admin"
     assert history[1]["from_status"] == history[1]["to_status"] == "NOT_STARTED"
@@ -418,3 +423,42 @@ def test_database_refuses_a_template_dependency_from_another_template(db, world,
     with db.begin_nested(), pytest.raises(IntegrityError):
         task.depends_on_task_id = template["tasks"][0]["id"]
         db.flush()
+
+
+def test_impossible_dates_are_refused(client, world, assign, template):
+    admin = auth(world.admin)
+    body = {"employee_id": world.colleague.id, "template_id": template["id"]}
+    for start in ("1800-01-01", "2999-01-01"):
+        refused = client.post(f"{API}/checklists", json=body | {"start_date": start}, headers=admin)
+        assert refused.status_code == 422
+
+    account = tasks_of(assign())["Create account"]
+    before_start = {"due_date": (AHEAD - timedelta(days=1)).isoformat()}
+    refused = client.patch(f"{API}/tasks/{account['id']}", json=before_start, headers=admin)
+    assert refused.status_code == 422
+    assert "before the checklist start date" in refused.json()["error"]["message"]
+
+
+def test_template_task_edit_with_an_unknown_department_is_refused(client, world, template):
+    admin = auth(world.admin)
+    tasks = client.get(f"{API}/templates/{template['id']}", headers=admin).json()["tasks"]
+    url = f"{API}/templates/{template['id']}/tasks/{tasks[0]['id']}"
+    for body in ({"owner_department_id": 999999}, {"sort_order": 10**15}):
+        refused = client.patch(url, json=body, headers=admin)
+        assert refused.status_code == 422, refused.text
+    assert client.get(f"{API}/templates/{template['id']}", headers=admin).status_code == 200
+
+
+def test_checklist_that_starts_long_ago_comes_with_a_warning(assign, world):
+    assert any("days ago" in w for w in assign(start=LONG_AGO)["warnings"])
+    assert not any("days ago" in w for w in assign(world.colleague)["warnings"])
+
+
+def test_open_tasks_do_not_include_blocked_ones(client, world, assign):
+    assign()
+    mine = f"{API}/tasks/mine"
+    headers = auth(world.it_manager)
+    count = lambda state: len(client.get(f"{mine}?state={state}", headers=headers).json())  # noqa: E731
+    everything = len(client.get(mine, headers=headers).json())
+    assert count("blocked") >= 1
+    assert count("open") + count("blocked") + count("completed") == everything

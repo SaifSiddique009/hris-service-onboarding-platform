@@ -253,3 +253,98 @@ def test_search_treats_percent_and_underscore_as_plain_text(client, world):
     assert client.get(f"{API}/users?search=%25", headers=headers).json()["total"] == 0
     assert client.get(f"{API}/users?search=_", headers=headers).json()["total"] == 0
     assert client.get(f"{API}/users?search=employ", headers=headers).json()["total"] == 1
+
+
+def test_joining_date_must_be_plausible(client, world):
+    for joined in ("1800-01-01", "2999-01-01"):
+        response = client.post(
+            f"{API}/users", json=new_user(world, joining_date=joined), headers=auth(world.admin)
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["details"]["fields"] == {
+            "joining_date": "Joining date must be between the year 2000 and one year from today"
+        }
+
+
+def test_admin_cannot_change_their_own_role(client, world):
+    url = f"{API}/users/{world.admin.id}"
+    refused = client.patch(url, json={"role": "EMPLOYEE"}, headers=auth(world.admin))
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "OWN_ROLE"
+    same_role = {"role": "HR_ADMIN", "job_title": "Head of People"}
+    assert client.patch(url, json=same_role, headers=auth(world.admin)).status_code == 200
+
+
+def test_disabling_an_account_reports_who_still_reports_to_it(client, world):
+    admin = auth(world.admin)
+    url = f"{API}/users/{world.manager.id}"
+    reply = client.patch(url, json={"is_active": False}, headers=admin)
+    assert reply.json()["direct_reports"] == 2
+
+    assert names(client.get(f"{API}/users?is_active=false", headers=admin)) == {"Manager"}
+    assert client.get(f"{API}/users?is_active=true", headers=admin).json()["total"] == 5
+
+    # Other details still save while the person's manager is disabled.
+    renamed = client.patch(
+        f"{API}/users/{world.employee.id}",
+        json={"full_name": "Employee One", "manager_id": world.manager.id},
+        headers=admin,
+    )
+    assert renamed.status_code == 200
+
+
+def test_manager_lookup_offers_only_people_who_can_manage(client, world):
+    found = client.get(f"{API}/users/lookup?managing=true", headers=auth(world.admin)).json()
+    assert {u["full_name"] for u in found} == {"Admin", "Manager", "IT Manager"}
+
+
+def test_admin_sets_a_new_password_for_someone_who_forgot_theirs(client, world):
+    url = f"{API}/users/{world.employee.id}/password"
+    session = auth(world.employee)
+    body = {"new_password": "Reset@2027"}
+    assert client.post(url, json=body, headers=auth(world.manager)).status_code == 403
+    weak = client.post(url, json={"new_password": "weak"}, headers=auth(world.admin))
+    assert weak.status_code == 422
+
+    assert client.post(url, json=body, headers=auth(world.admin)).status_code == 204
+    assert client.get(f"{API}/auth/me", headers=session).status_code == 401
+    login = {"email": world.employee.email, "password": "Reset@2027"}
+    assert client.post(f"{API}/auth/login", json=login).status_code == 200
+
+    own_url = f"{API}/users/{world.admin.id}/password"
+    own = client.post(own_url, json=body, headers=auth(world.admin))
+    assert own.json()["error"]["code"] == "OWN_PASSWORD"
+
+
+def test_admin_cannot_disable_their_own_sign_in(client, world):
+    url = f"{API}/users/{world.admin.id}"
+    refused = client.patch(url, json={"is_active": False}, headers=auth(world.admin))
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "OWN_ACCOUNT"
+
+
+def test_only_an_hr_admin_creates_accounts_of_any_role(client, world):
+    body = new_user(world, role="HR_ADMIN", email="second.admin@example.test")
+    for user in (world.manager, world.employee):
+        assert client.post(f"{API}/users", json=body, headers=auth(user)).status_code == 403
+    created = client.post(f"{API}/users", json=body, headers=auth(world.admin))
+    assert created.status_code == 201
+    assert created.json()["role"] == "HR_ADMIN"
+
+
+def test_fields_that_cannot_be_edited_are_refused_not_ignored(client, world):
+    url = f"{API}/users/{world.employee.id}"
+    refused = client.patch(url, json={"email": "new@example.test"}, headers=auth(world.admin))
+    assert refused.status_code == 422
+    assert refused.json()["error"]["details"]["fields"] == {"email": "Email cannot be changed here"}
+
+
+def test_a_date_one_year_ahead_is_the_last_one_allowed(client, world):
+    from datetime import date, timedelta
+
+    url = f"{API}/users/{world.employee.id}"
+    last = date.today() + timedelta(days=365)
+    ok = client.patch(url, json={"joining_date": last.isoformat()}, headers=auth(world.admin))
+    assert ok.status_code == 200
+    late = {"joining_date": (last + timedelta(days=1)).isoformat()}
+    assert client.patch(url, json=late, headers=auth(world.admin)).status_code == 422

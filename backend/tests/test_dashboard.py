@@ -125,7 +125,8 @@ def test_report_filters_and_grouping(db, world, data):
         "groups": [{"label": "EMPLOYEE", "count": 1}, {"label": "MANAGER", "count": 1}],
     }
     blocked = reports.list_onboarding_tasks(db, "blocked")
-    assert [(t["task"], t["status"], t["overdue"]) for t in blocked] == [
+    assert blocked["total"] == 1
+    assert [(t["task"], t["status"], t["overdue"]) for t in blocked["rows"]] == [
         ("Second step", "BLOCKED", True)
     ]
     assert reports.onboarding_progress(db, active_only=True)[0]["overdue"] == 2

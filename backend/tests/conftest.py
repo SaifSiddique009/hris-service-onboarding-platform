@@ -9,6 +9,7 @@ from datetime import date  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session  # noqa: E402
 
 from app import models  # noqa: E402, F401
@@ -48,7 +49,15 @@ def db():
 
 @pytest.fixture
 def client(db):
-    app.dependency_overrides[get_db] = lambda: db
+    def shared():
+        try:
+            yield db
+        except DataError:
+            # A real request owns its session and drops it; the shared one has to be reset.
+            db.rollback()
+            raise
+
+    app.dependency_overrides[get_db] = shared
     yield TestClient(app)
     app.dependency_overrides.clear()
 

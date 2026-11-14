@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.modules.requests import service
 from app.modules.requests.models import RequestCategory, ServiceRequest
+from app.modules.users.models import UserRole
 
 API = "/api/v1"
 
@@ -103,8 +104,14 @@ def test_confidential_request_bypasses_the_manager(client, submit, do, world):
     to_manager = do(world.admin, request, "assign", assignee=world.manager)
     assert to_manager.status_code == 422
 
-    assert do(world.admin, request, "assign", assignee=world.it_engineer).status_code == 200
-    assert fetch(client, world.it_engineer, request).status_code == 200
+    # Nor to another team: only the department that owns the category handles it.
+    outside = do(world.admin, request, "assign", assignee=world.it_engineer)
+    assert outside.status_code == 422
+    assert "People & Culture" in outside.json()["error"]["message"]
+
+    partner = world.user("HR Partner", UserRole.EMPLOYEE, world.people)
+    assert do(world.admin, request, "assign", assignee=partner).status_code == 200
+    assert fetch(client, partner, request).status_code == 200
     assert fetch(client, world.manager, request).status_code == 404
 
 
@@ -160,7 +167,7 @@ def test_actions_from_the_wrong_status_are_conflicts(submit, do, world):
         response = do(world.employee, request, action, note="x")
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "INVALID_TRANSITION"
-    assert do(world.employee, request, "teleport").status_code == 409
+    assert do(world.employee, request, "teleport").status_code == 422
 
 
 def test_required_notes(submit, do, world):
@@ -201,11 +208,12 @@ def test_withdraw_and_reject_record_why_the_request_closed(submit, do, world):
     assert rejected["closure_reason"] == "REJECTED"
     assert rejected["history"][-1]["note"] == "Duplicate"
 
-    # An assignee handed an invalid request can send it back before starting.
+    # Being handed a request does not give the right to close it: only a triager rejects.
     assigned = submit(world.employee)
     do(world.manager, assigned, "assign", assignee=world.it_engineer)
-    by_assignee = do(world.it_engineer, assigned, "reject", note="Not an IT issue")
-    assert by_assignee.json()["closure_reason"] == "REJECTED"
+    assert do(world.it_engineer, assigned, "reject", note="Not an IT issue").status_code == 403
+    by_triager = do(world.manager, assigned, "reject", note="Not an IT issue")
+    assert by_triager.json()["closure_reason"] == "REJECTED"
 
     # Withdrawing is only for the requester, and only before assignment.
     other = submit(world.employee)
@@ -223,7 +231,7 @@ def test_allowed_actions_follow_the_viewer(client, submit, do, world):
     assert actions(world.employee) == {"withdraw", "comment"}
     assert actions(world.manager) == {"assign", "reject", "comment"}
     do(world.manager, request, "assign", assignee=world.it_engineer)
-    assert actions(world.it_engineer) == {"start", "reject", "comment"}
+    assert actions(world.it_engineer) == {"start", "comment"}
     assert actions(world.employee) == {"comment"}
     assert actions(world.admin) == {"reassign", "reject", "comment"}
 
@@ -292,16 +300,18 @@ def test_assignee_of_a_confidential_request_cannot_become_the_requesters_manager
     client, submit, do, world
 ):
     request = submit(world.employee, "hr")
-    do(world.admin, request, "assign", assignee=world.it_manager)
+    lead = world.user("HR Lead", UserRole.MANAGER, world.people)
+    partner = world.user("HR Partner", UserRole.EMPLOYEE, world.people)
+    do(world.admin, request, "assign", assignee=lead)
     url = f"{API}/users/{world.employee.id}"
-    refused = client.patch(url, json={"manager_id": world.it_manager.id}, headers=auth(world.admin))
+    refused = client.patch(url, json={"manager_id": lead.id}, headers=auth(world.admin))
     assert refused.status_code == 409
     assert refused.json()["error"]["code"] == "CONFIDENTIAL_REQUEST"
 
-    do(world.admin, request, "reassign", assignee=world.it_engineer)
-    allowed = client.patch(url, json={"manager_id": world.it_manager.id}, headers=auth(world.admin))
+    do(world.admin, request, "reassign", assignee=partner)
+    allowed = client.patch(url, json={"manager_id": lead.id}, headers=auth(world.admin))
     assert allowed.status_code == 200
-    assert fetch(client, world.it_manager, request).status_code == 404
+    assert fetch(client, lead, request).status_code == 404
 
 
 ALL_STATUSES = ["SUBMITTED", "ASSIGNED", "IN_PROGRESS", "RESOLVED", "CLOSED"]
@@ -404,3 +414,62 @@ def test_request_text_of_only_spaces_is_rejected(field, client, world, categorie
 
 def test_request_title_is_stored_without_surrounding_spaces(submit, world):
     assert submit(world.employee, title="   Monitor arm   ")["title"] == "Monitor arm"
+
+
+def test_history_names_who_received_the_request(client, submit, do, world):
+    request = submit(world.employee)
+    do(world.admin, request, "assign", assignee=world.it_engineer)
+    same_person = do(world.admin, request, "reassign", assignee=world.it_engineer)
+    assert same_person.status_code == 422
+    assert "already has this request" in same_person.json()["error"]["message"]
+
+    history = fetch(client, world.employee, request).json()["history"]
+    assert [e["assignee"] and e["assignee"]["full_name"] for e in history] == [None, "IT Engineer"]
+
+
+def test_search_finds_a_request_by_reference_or_title(client, submit, world):
+    first = submit(world.employee)
+    second = submit(world.employee, title="Need a second monitor")
+    assert listed(client, world.admin, f"?search={second['reference']}") == [second["id"]]
+    assert listed(client, world.admin, f"?search= {first['id']} ") == [first["id"]]
+    assert listed(client, world.admin, "?search= monitor ") == [second["id"]]
+
+
+def test_text_of_only_invisible_characters_is_refused(client, categories, world):
+    body = {
+        "title": "\u200b\u200b\u200b\u200b",
+        "description": "The screen cracked when the laptop fell off my desk.",
+        "category_id": categories["it"].id,
+        "priority": "LOW",
+    }
+    response = client.post(f"{API}/requests", json=body, headers=auth(world.employee))
+    assert response.status_code == 422
+    assert response.json()["error"]["message"] == "Title must be at least 3 characters"
+
+
+def test_wrong_status_is_explained_in_plain_words(submit, do, world):
+    request = submit(world.employee)
+    refused = do(world.employee, request, "close")
+    assert refused.status_code == 409
+    assert refused.json()["error"]["message"] == "This cannot be done now: the status is Submitted"
+
+
+def test_input_the_database_cannot_hold_is_refused_cleanly(client, submit, do, world, categories):
+    admin = auth(world.admin)
+    request = submit(world.employee, title="Laptop\x00 screen is cracked")
+    assert request["title"] == "Laptop screen is cracked"
+    assert client.get(f"{API}/requests?search=crack%00ed", headers=admin).status_code == 200
+
+    too_big = 2**31
+    for path in (f"/requests/{too_big}", f"/requests?category_id={too_big}"):
+        refused = client.get(f"{API}{path}", headers=admin)
+        assert refused.status_code == 422
+        assert refused.json()["error"]["message"] == "One of the values is not valid"
+    assert listed(client, world.admin, f"?search=REQ-{'9' * 20}") == []
+    body = {"assignee_id": too_big, "note": None}
+    url = f"{API}/requests/{request['id']}/assign"
+    assert client.post(url, json=body, headers=admin).status_code == 422
+
+    unknown = do(world.admin, request, "explode")
+    assert unknown.status_code == 422
+    assert unknown.json()["error"]["message"] == "Action is not valid"

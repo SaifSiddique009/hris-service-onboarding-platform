@@ -40,8 +40,9 @@ def model(monkeypatch):
 
 @pytest.fixture
 def ask(client, world):
-    def _ask(question, user=None):
-        return client.post(URL, json={"question": question}, headers=auth(user or world.admin))
+    def _ask(question, user=None, history=()):
+        body = {"question": question, "history": list(history)}
+        return client.post(URL, json=body, headers=auth(user or world.admin))
 
     return _ask
 
@@ -76,8 +77,11 @@ def test_answer_comes_from_a_tool_run_against_live_data(ask, model, some_request
     assert body["tools_used"] == [
         {
             "name": "count_service_requests",
+            "label": "service requests",
             "arguments": {"state": "unresolved", "country": "Cyprus"},
             "row_count": 1,
+            "total": 2,
+            "truncated": False,
             "rows": [{"total": 2}],
         }
     ]
@@ -245,3 +249,38 @@ def test_reply_that_used_no_data_becomes_the_fixed_scope_message(reply, ask, mod
 
 def test_question_of_only_spaces_is_rejected(ask, model):
     assert ask("     ").status_code == 422
+
+
+def test_a_cut_list_says_how_many_there_are_in_all(ask, model, some_requests):
+    script, sent = model
+    script += [tool_call("list_service_requests", limit=1), says("One of two.")]
+    used = ask("List requests").json()["tools_used"][0]
+    assert (used["row_count"], used["total"], used["truncated"]) == (1, 2, True)
+
+    told = json.loads(sent[1]["messages"][-1]["content"])
+    assert told["total"] == 2
+    assert told["note"] == "Only the first 1 of 2 are listed. Say so in the answer."
+
+
+def test_earlier_turns_are_sent_so_a_follow_up_makes_sense(ask, model, some_requests):
+    script, sent = model
+    script += [tool_call("count_service_requests", country="Cyprus"), says("Two in Cyprus.")]
+    earlier = [{"question": "How many requests are open?", "answer": "Two requests are open."}]
+    assert ask("And in Cyprus?", history=earlier).json()["answer"] == "Two in Cyprus."
+
+    roles = [(m["role"], m["content"]) for m in sent[0]["messages"][1:]]
+    assert roles == [
+        ("user", "How many requests are open?"),
+        ("assistant", "Two requests are open."),
+        ("user", "And in Cyprus?"),
+    ]
+    too_many = earlier * 5
+    assert ask("And in Cyprus?", history=too_many).status_code == 422
+
+
+def test_the_model_is_given_words_and_dates_as_a_person_reads_them():
+    raw = {"rows": [{"status": "IN_PROGRESS", "due_date": "2026-11-10", "country": "CY"}]}
+    assert tools.readable(raw) == {
+        "rows": [{"status": "In progress", "due_date": "10 Nov 2026", "country": "CY"}]
+    }
+    assert tools.readable({"label": "HR_ADMIN"}) == {"label": "HR Admin"}
